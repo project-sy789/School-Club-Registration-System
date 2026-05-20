@@ -635,10 +635,11 @@ input[type="checkbox"]:checked + .toggle-switch::after {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 1.5rem;
+    padding: 1rem;
     opacity: 0;
     pointer-events: none;
     transition: var(--transition-smooth);
+    overflow-y: auto;
 }
 
 .modal-overlay.active {
@@ -649,15 +650,24 @@ input[type="checkbox"]:checked + .toggle-switch::after {
 .modal-card {
     width: 100%;
     max-width: 550px;
+    max-height: calc(100vh - 2rem);
+    overflow-y: auto;
     padding: 2.25rem;
     border-radius: var(--border-radius-lg);
     position: relative;
     transform: scale(0.9);
     transition: var(--transition-smooth);
+    box-sizing: border-box;
 }
 
 .modal-overlay.active .modal-card {
     transform: scale(1);
+}
+
+@media (max-width: 576px) {
+    .modal-card {
+        padding: 1.5rem;
+    }
 }
 
 .modal-close {

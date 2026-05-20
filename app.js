@@ -30,6 +30,25 @@ document.addEventListener("DOMContentLoaded", () => {
         switchTab('home');
     });
 
+    // ตรวจสอบการเปลี่ยนตัวเลือกห้องเรียน เพื่อรองรับช่องกรอกระบุเอง (Custom input)
+    const levelSelect = document.getElementById("level-input");
+    if (levelSelect) {
+        levelSelect.addEventListener("change", function() {
+            const customContainer = document.getElementById("level-custom-container");
+            if (customContainer) {
+                if (this.value === "custom") {
+                    customContainer.style.display = "block";
+                    const customInput = document.getElementById("level-custom-input");
+                    if (customInput) customInput.focus();
+                } else {
+                    customContainer.style.display = "none";
+                    const customInput = document.getElementById("level-custom-input");
+                    if (customInput) customInput.value = "";
+                }
+            }
+        });
+    }
+
     initSupabaseConnection();
 });
 
@@ -84,6 +103,7 @@ function initSupabaseConnection() {
         loadSystemSettings().then(() => {
             loadClubsData();
             startCountdownTimer();
+            populateRegistrationLevelDropdown();
         });
     } catch (e) {
         showToast("ไม่สามารถสร้างการเชื่อมต่อไปยัง Supabase ได้ กรุณาตรวจสอบตัวแปรของคุณ", "error");
@@ -540,7 +560,7 @@ function openRegistrationModal(clubId) {
     document.getElementById("prefix-input").value = "";
     document.getElementById("first-name-input").value = "";
     document.getElementById("last-name-input").value = "";
-    document.getElementById("level-input").value = "";
+    resetLevelInput();
     
     document.getElementById("verify-alert-box").style.display = "none";
     document.getElementById("verify-alert-box").className = "verification-alert";
@@ -553,7 +573,7 @@ function openRegistrationModal(clubId) {
         document.getElementById("prefix-input").value = data.prefix || "";
         document.getElementById("first-name-input").value = data.first_name;
         document.getElementById("last-name-input").value = data.last_name;
-        document.getElementById("level-input").value = data.level;
+        prefillLevelDropdownAndEnsureOption(data.level);
         
         const alertBox = document.getElementById("verify-alert-box");
         alertBox.style.display = "flex";
@@ -627,7 +647,7 @@ async function verifyStudentID() {
             document.getElementById("prefix-input").value = data.prefix || "";
             document.getElementById("first-name-input").value = data.first_name;
             document.getElementById("last-name-input").value = data.last_name;
-            document.getElementById("level-input").value = data.level;
+            prefillLevelDropdownAndEnsureOption(data.level);
             
             // อัปเดต UI คัดกรองของระดับชั้นนั้นทันทีเพื่อความสะดวก
             const userGradePrefix = data.level.split('/')[0];
@@ -653,7 +673,7 @@ async function verifyStudentID() {
             document.getElementById("prefix-input").value = "";
             document.getElementById("first-name-input").value = "";
             document.getElementById("last-name-input").value = "";
-            document.getElementById("level-input").value = "";
+            resetLevelInput();
             
             // เปิดสวิตช์ฟิลด์กรอกข้อมูล
             manualArea.classList.add("active");
@@ -686,7 +706,7 @@ function enableNewStudentManualEntry() {
     document.getElementById("prefix-input").value = "";
     document.getElementById("first-name-input").value = "";
     document.getElementById("last-name-input").value = "";
-    document.getElementById("level-input").value = "";
+    resetLevelInput();
     
     // เปิดสวิตช์ฟิลด์กรอกข้อมูล
     document.getElementById("manual-entry-form").classList.add("active");
@@ -701,6 +721,9 @@ async function submitStudentRegistration() {
     let firstName = document.getElementById("first-name-input").value.trim();
     let lastName = document.getElementById("last-name-input").value.trim();
     let level = document.getElementById("level-input").value;
+    if (level === "custom") {
+        level = document.getElementById("level-custom-input") ? document.getElementById("level-custom-input").value.trim() : "";
+    }
 
     const submitBtn = document.getElementById("submit-registration-btn");
 
@@ -1464,6 +1487,180 @@ async function deleteClub(clubId, clubName) {
     }
 }
 
+// 👥 ดึงรายชื่อระดับชั้นนักเรียนทั้งหมดจากฐานข้อมูล เพื่อใส่ในตัวเลือกการสมัครแบบไดนามิก (ป้องกันปัญหานำเข้าห้องเรียนไม่ตรงกัน)
+let hasPopulatedRegistrationLevels = false;
+
+async function populateRegistrationLevelDropdown(force = false) {
+    const levelSelect = document.getElementById("level-input");
+    if (!levelSelect || (!force && hasPopulatedRegistrationLevels)) return;
+
+    try {
+        const { data, error } = await supabaseClient
+            .from("students")
+            .select("level");
+        
+        if (error) throw error;
+        
+        if (data && data.length > 0) {
+            const levels = [...new Set(data.map(item => item.level).filter(Boolean))];
+            // จัดเรียงระดับชั้น/ห้อง (เช่น ม.1/1, ม.1/2)
+            levels.sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
+            
+            // ล้างข้อมูลเดิม
+            levelSelect.innerHTML = '<option value="">เลือกระดับชั้น/ห้อง...</option>';
+            
+            // แยกกลุ่มระดับชั้น
+            const juniorHigh = [];
+            const seniorHigh = [];
+            const otherLevels = [];
+            
+            levels.forEach(lvl => {
+                const prefix = lvl.split('/')[0];
+                if (["ม.1", "ม.2", "ม.3"].includes(prefix)) {
+                    juniorHigh.push(lvl);
+                } else if (["ม.4", "ม.5", "ม.6"].includes(prefix)) {
+                    seniorHigh.push(lvl);
+                } else {
+                    otherLevels.push(lvl);
+                }
+            });
+            
+            if (juniorHigh.length > 0) {
+                const grp = document.createElement("optgroup");
+                grp.label = "มัธยมศึกษาตอนต้น";
+                juniorHigh.forEach(lvl => {
+                    const opt = document.createElement("option");
+                    opt.value = lvl;
+                    opt.textContent = lvl;
+                    grp.appendChild(opt);
+                });
+                levelSelect.appendChild(grp);
+            }
+            
+            if (seniorHigh.length > 0) {
+                const grp = document.createElement("optgroup");
+                grp.label = "มัธยมศึกษาตอนปลาย";
+                seniorHigh.forEach(lvl => {
+                    const opt = document.createElement("option");
+                    opt.value = lvl;
+                    opt.textContent = lvl;
+                    grp.appendChild(opt);
+                });
+                levelSelect.appendChild(grp);
+            }
+            
+            if (otherLevels.length > 0) {
+                const grp = document.createElement("optgroup");
+                grp.label = "ระดับชั้นอื่นๆ";
+                otherLevels.forEach(lvl => {
+                    const opt = document.createElement("option");
+                    opt.value = lvl;
+                    opt.textContent = lvl;
+                    grp.appendChild(opt);
+                });
+                levelSelect.appendChild(grp);
+            }
+            
+            // ปุ่มระบุเอง
+            const customOpt = document.createElement("option");
+            customOpt.value = "custom";
+            customOpt.textContent = "อื่นๆ (ระบุห้องเรียนเอง)...";
+            customOpt.style.color = "var(--accent-mint)";
+            customOpt.style.fontWeight = "bold";
+            levelSelect.appendChild(customOpt);
+            
+            hasPopulatedRegistrationLevels = true;
+        } else {
+            useFallbackRegistrationLevels(levelSelect);
+        }
+    } catch (e) {
+        console.error("Error populating registration levels:", e);
+        useFallbackRegistrationLevels(levelSelect);
+    }
+}
+
+function useFallbackRegistrationLevels(levelSelect) {
+    levelSelect.innerHTML = `
+        <option value="">เลือกระดับชั้น/ห้อง...</option>
+        <optgroup label="มัธยมศึกษาตอนต้น">
+            <option value="ม.1/1">ม.1/1</option><option value="ม.1/2">ม.1/2</option><option value="ม.1/3">ม.1/3</option><option value="ม.1/4">ม.1/4</option>
+            <option value="ม.2/1">ม.2/1</option><option value="ม.2/2">ม.2/2</option><option value="ม.2/3">ม.2/3</option><option value="ม.2/4">ม.2/4</option>
+            <option value="ม.3/1">ม.3/1</option><option value="ม.3/2">ม.3/2</option><option value="ม.3/3">ม.3/3</option><option value="ม.3/4">ม.3/4</option>
+        </optgroup>
+        <optgroup label="มัธยมศึกษาตอนปลาย">
+            <option value="ม.4/1">ม.4/1</option><option value="ม.4/2">ม.4/2</option><option value="ม.4/3">ม.4/3</option><option value="ม.4/4">ม.4/4</option>
+            <option value="ม.5/1">ม.5/1</option><option value="ม.5/2">ม.5/2</option><option value="ม.5/3">ม.5/3</option><option value="ม.5/4">ม.5/4</option>
+            <option value="ม.6/1">ม.6/1</option><option value="ม.6/2">ม.6/2</option><option value="ม.6/3">ม.6/3</option><option value="ม.6/4">ม.6/4</option>
+        </optgroup>
+        <option value="custom" style="color: var(--accent-mint); font-weight: bold;">อื่นๆ (ระบุห้องเรียนเอง)...</option>
+    `;
+}
+
+// 🛡️ พรีฟิลระดับชั้นในแบบฟอร์มการสมัครเรียน และตรวจสอบว่ามีตัวเลือกนั้นหรือไม่ (ถ้าไม่มีให้สร้างขึ้นมาแบบไดนามิกเพื่อป้องกันข้อมูลผิดพลาด)
+function prefillLevelDropdownAndEnsureOption(levelValue) {
+    const levelSelect = document.getElementById("level-input");
+    if (!levelSelect || !levelValue) return;
+
+    // ตรวจสอบว่ามี Option ค่านี้อยู่แล้วหรือไม่
+    let optionExists = false;
+    for (let i = 0; i < levelSelect.options.length; i++) {
+        if (levelSelect.options[i].value === levelValue) {
+            optionExists = true;
+            break;
+        }
+    }
+
+    // หากไม่มี Option นี้ ให้สร้างและเพิ่มเข้า dropdown ทันที
+    if (!optionExists) {
+        const opt = document.createElement("option");
+        opt.value = levelValue;
+        opt.textContent = levelValue;
+
+        // ค้นหา optgroup ที่เหมาะสมตามโครงสร้างชั้นปี
+        const prefix = levelValue.split('/')[0];
+        let optgroup = null;
+        const groups = levelSelect.getElementsByTagName("optgroup");
+        for (let g of groups) {
+            if (g.label.includes("ตอนต้น") && ["ม.1", "ม.2", "ม.3"].includes(prefix)) {
+                optgroup = g;
+                break;
+            } else if (g.label.includes("ตอนปลาย") && ["ม.4", "ม.5", "ม.6"].includes(prefix)) {
+                optgroup = g;
+                break;
+            }
+        }
+
+        if (optgroup) {
+            optgroup.appendChild(opt);
+        } else {
+            // ใส่ไว้ก่อนหน้าตัวเลือกอื่นๆ (ระบุเอง)
+            levelSelect.insertBefore(opt, levelSelect.lastElementChild);
+        }
+    }
+
+    levelSelect.value = levelValue;
+    
+    // ซ่อนช่องกรอก Custom ระบุเอง เนื่องจากเรามีข้อมูลที่เลือกได้แล้ว
+    const customContainer = document.getElementById("level-custom-container");
+    if (customContainer) {
+        customContainer.style.display = "none";
+        const customInput = document.getElementById("level-custom-input");
+        if (customInput) customInput.value = "";
+    }
+}
+
+// 🧹 รีเซ็ตการเลือกห้องเรียนและซ่อนตัวเลือกกรอกเอง
+function resetLevelInput() {
+    const levelSelect = document.getElementById("level-input");
+    if (levelSelect) levelSelect.value = "";
+    
+    const customContainer = document.getElementById("level-custom-container");
+    if (customContainer) customContainer.style.display = "none";
+    
+    const customInput = document.getElementById("level-custom-input");
+    if (customInput) customInput.value = "";
+}
+
 // 👥 ดึงรายชื่อนักเรียนที่มีในระบบ (สำหรับ bulk import และแสดงฐานข้อมูลนักเรียน)
 let hasPopulatedStudentLevels = false;
 
@@ -1657,6 +1854,7 @@ async function handleStudentCSVImport(event) {
 
             showToast(`นำเข้าฐานข้อมูลรายชื่อนักเรียนสำเร็จรวม ${batch.length} รายการ!`, "success");
             loadStudentsList();
+            populateRegistrationLevelDropdown(true);
         } catch (err) {
             console.error("Error importing bulk data:", err);
             showToast("เกิดข้อผิดพลาดในการ Bulk อัปเดตรายชื่อนักเรียน", "error");
