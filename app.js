@@ -1904,6 +1904,10 @@ function removeSchoolLogo() {
     document.getElementById("admin-settings-logo-file").value = "";
 }
 
+// ผูกฟังก์ชันเข้ากับ global scope ให้บราวเซอร์เรียกใช้งานผ่าน Event Handler ได้เสมอ
+window.handleLogoUpload = handleLogoUpload;
+window.removeSchoolLogo = removeSchoolLogo;
+
 // =====================================================================
 // 📊 8. EXPORT CSV FOR THAI EXCEL (UTF-8 WITH BOM)
 // =====================================================================
