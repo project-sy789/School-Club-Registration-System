@@ -53,6 +53,7 @@ CREATE POLICY "Allow public all access to clubs for testing" ON clubs FOR ALL US
 -- 4. สร้างตารางรายชื่อนักเรียนที่มีอยู่ในระบบ (Students)
 CREATE TABLE students (
     student_id TEXT PRIMARY KEY, -- เลขประจำตัวนักเรียน
+    prefix TEXT, -- คำนำหน้าชื่อ เช่น เด็กชาย, นาย, นางสาว
     first_name TEXT NOT NULL,
     last_name TEXT NOT NULL,
     level TEXT NOT NULL -- เช่น ม.4/1, ม.5/2
@@ -69,6 +70,7 @@ CREATE TABLE registrations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     club_id UUID REFERENCES clubs(id) ON DELETE CASCADE,
     student_id TEXT, -- สามารถเป็น NULL ได้ สำหรับนักเรียนใหม่ที่ไม่มีเลขในระบบ
+    prefix TEXT, -- คำนำหน้าชื่อ เช่น เด็กชาย, นาย, นางสาว
     first_name TEXT NOT NULL,
     last_name TEXT NOT NULL,
     level TEXT NOT NULL, -- เช่น ม.4/1
@@ -108,9 +110,12 @@ CREATE POLICY "Allow read access to audit_logs for admin" ON audit_logs FOR SELE
 -- ⚡ STORED PROCEDURE: register_student_atomic
 -- ฟังก์ชันประมวลผลการสมัครแบบ Atomic เพื่อป้องกัน Race Condition และรองรับโหลดพร้อมกันสูง
 -- =====================================================================
+DROP FUNCTION IF EXISTS register_student_atomic(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT);
+
 CREATE OR REPLACE FUNCTION register_student_atomic(
     p_club_id UUID,
     p_student_id TEXT,
+    p_prefix TEXT, -- พารามิเตอร์ใหม่
     p_first_name TEXT,
     p_last_name TEXT,
     p_level TEXT,
@@ -214,8 +219,8 @@ BEGIN
     END IF;
 
     -- 5. ดำเนินการสมัคร: เพิ่มชื่อนักเรียนในตารางการลงทะเบียน
-    INSERT INTO registrations (club_id, student_id, first_name, last_name, level, registration_status)
-    VALUES (p_club_id, v_student_id_cleaned, TRIM(p_first_name), TRIM(p_last_name), TRIM(p_level), v_status)
+    INSERT INTO registrations (club_id, student_id, prefix, first_name, last_name, level, registration_status)
+    VALUES (p_club_id, v_student_id_cleaned, TRIM(p_prefix), TRIM(p_first_name), TRIM(p_last_name), TRIM(p_level), v_status)
     RETURNING id INTO v_registered_id;
 
     -- 6. อัปเดตยอดผู้สมัครในแถวของชุมนุมให้เรียบร้อย
@@ -227,7 +232,7 @@ BEGIN
     INSERT INTO audit_logs (student_id, student_name, action, club_name, ip_address, user_agent, details)
     VALUES (
         v_student_id_cleaned,
-        TRIM(p_first_name) || ' ' || TRIM(p_last_name),
+        COALESCE(TRIM(p_prefix), '') || TRIM(p_first_name) || ' ' || TRIM(p_last_name),
         CASE WHEN v_status = 'verified' THEN 'REGISTER_SUCCESS' ELSE 'REGISTER_PENDING' END,
         v_club_name,
         COALESCE(p_ip_address, 'Unknown IP'),
@@ -281,20 +286,20 @@ INSERT INTO clubs (name, teacher, location, description, grades, capacity) VALUE
 ('ชุมนุมอาหารไทยและเบเกอรี่เบื้องต้น', 'ครูสุมาลี ครัวไทย', 'ห้องคหกรรม อาคาร 2', 'ฝึกทำอาหารคาวไทยยอดนิยมและขนมเค้ก/เบเกอรี่ พร้อมเคล็ดลับการจัดจานเพื่อสร้างรายได้เสริมในโรงเรียน', ARRAY['ม.1', 'ม.2', 'ม.3', 'ม.4', 'ม.5', 'ม.6'], 20);
 
 -- ข้อมูลตัวอย่างนักเรียน (สุ่มตัวอย่างห้อง ม.ปลาย และ ม.ต้น)
-INSERT INTO students (student_id, first_name, last_name, level) VALUES
-('10001', 'กิตติพงศ์', 'ทองดี', 'ม.4/1'),
-('10002', 'ณัฏฐณิชา', 'จิตอารีย์', 'ม.4/1'),
-('10003', 'ธนพล', 'ปัญญาแก้ว', 'ม.4/2'),
-('10004', 'สุภัสสรา', 'อินทร์จันทร์', 'ม.4/2'),
-('10005', 'ปกรณ์', 'มีชัย', 'ม.5/1'),
-('10006', 'วรัญญา', 'ศรีสุข', 'ม.5/1'),
-('10007', 'จิรเดช', 'สมบูรณ์', 'ม.5/2'),
-('10008', 'นัทธ์ชนัน', 'แสงอรุณ', 'ม.5/2'),
-('10009', 'ปรเมศวร์', 'อุดมผล', 'ม.6/1'),
-('10010', 'อภิชญา', 'สิริกุล', 'ม.6/1'),
-('10011', 'ศุภโชค', 'ใจดี', 'ม.1/1'),
-('10012', 'อนัญญา', 'รักษาสัตย์', 'ม.1/1'),
-('10013', 'ธนภัทร', 'แก้วตา', 'ม.2/1'),
-('10014', 'ชลิดา', 'เดชรุ่ง', 'ม.2/1'),
-('10015', 'พีรพล', 'คงกระพัน', 'ม.3/1'),
-('10016', 'กนกวรรณ', 'สิริเวช', 'ม.3/2');
+INSERT INTO students (student_id, prefix, first_name, last_name, level) VALUES
+('10001', 'นาย', 'กิตติพงศ์', 'ทองดี', 'ม.4/1'),
+('10002', 'นางสาว', 'ณัฏฐณิชา', 'จิตอารีย์', 'ม.4/1'),
+('10003', 'นาย', 'ธนพล', 'ปัญญาแก้ว', 'ม.4/2'),
+('10004', 'นางสาว', 'สุภัสสรา', 'อินทร์จันทร์', 'ม.4/2'),
+('10005', 'นาย', 'ปกรณ์', 'มีชัย', 'ม.5/1'),
+('10006', 'นางสาว', 'วรัญญา', 'ศรีสุข', 'ม.5/1'),
+('10007', 'นาย', 'จิรเดช', 'สมบูรณ์', 'ม.5/2'),
+('10008', 'นางสาว', 'นัทธ์ชนัน', 'แสงอรุณ', 'ม.5/2'),
+('10009', 'นาย', 'ปรเมศวร์', 'อุดมผล', 'ม.6/1'),
+('10010', 'นางสาว', 'อภิชญา', 'สิริกุล', 'ม.6/1'),
+('10011', 'เด็กชาย', 'ศุภโชค', 'ใจดี', 'ม.1/1'),
+('10012', 'เด็กหญิง', 'อนัญญา', 'รักษาสัตย์', 'ม.1/1'),
+('10013', 'เด็กชาย', 'ธนภัทร', 'แก้วตา', 'ม.2/1'),
+('10014', 'เด็กหญิง', 'ชลิดา', 'เดชรุ่ง', 'ม.2/1'),
+('10015', 'เด็กชาย', 'พีรพล', 'คงกระพัน', 'ม.3/1'),
+('10016', 'เด็กหญิง', 'กนกวรรณ', 'สิริเวช', 'ม.3/2');

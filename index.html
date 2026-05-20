@@ -382,7 +382,7 @@
                             <i class="fa-solid fa-file-excel" style="color: var(--accent-mint);"></i>
                             <h4>ลากไฟล์ .csv หรือ .xlsx มาวางที่นี่ หรือคลิกเพื่ออัปโหลด</h4>
                             <p style="color: var(--text-secondary); font-size: 0.85rem;">
-                                โครงสร้างคอลัมน์ของไฟล์ Excel/CSV: <strong>student_id, first_name, last_name, level</strong>
+                                โครงสร้างคอลัมน์ของไฟล์ Excel/CSV: <strong>student_id, prefix, first_name, last_name, level</strong> (หรือแบบเดิมไม่มี prefix ก็รองรับอัตโนมัติ)
                             </p>
                             <input type="file" id="csv-file-input" accept=".csv, .xlsx, .xls" onchange="handleStudentCSVImport(event)">
                         </div>
@@ -409,6 +409,7 @@
                                     <thead>
                                         <tr>
                                             <th>เลขประจำตัว</th>
+                                            <th>คำนำหน้า</th>
                                             <th>ชื่อจริง</th>
                                             <th>นามสกุล</th>
                                             <th>ห้องเรียน</th>
@@ -416,7 +417,7 @@
                                     </thead>
                                     <tbody id="admin-students-list-tbody">
                                         <tr>
-                                            <td colspan="4" style="text-align: center; color: var(--text-muted);">ไม่พบรายชื่อในฐานข้อมูล หรือกำลังดาวน์โหลด...</td>
+                                            <td colspan="5" style="text-align: center; color: var(--text-muted);">ไม่พบรายชื่อในฐานข้อมูล หรือกำลังดาวน์โหลด...</td>
                                         </tr>
                                     </tbody>
                                 </table>
@@ -569,9 +570,19 @@
 
                     <!-- ส่วนกรอกข้อมูลด้วยตนเอง (จะถูกเปิดเมื่อไม่พบเลขนักเรียนในระบบ หรือเป็นนักเรียนใหม่) -->
                     <div class="manual-entry-area" id="manual-entry-form">
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                        <div class="form-name-grid">
                             <div class="input-group">
-                                <label for="first-name-input">ชื่อจริง (ไม่ต้องมีคำนำหน้า)</label>
+                                <label for="prefix-input">คำนำหน้า</label>
+                                <select id="prefix-input">
+                                    <option value="">คำนำหน้า...</option>
+                                    <option value="เด็กชาย">เด็กชาย</option>
+                                    <option value="เด็กหญิง">เด็กหญิง</option>
+                                    <option value="นาย">นาย</option>
+                                    <option value="นางสาว">นางสาว</option>
+                                </select>
+                            </div>
+                            <div class="input-group">
+                                <label for="first-name-input">ชื่อจริง</label>
                                 <input type="text" id="first-name-input" placeholder="เช่น สมยศ">
                             </div>
                             <div class="input-group">

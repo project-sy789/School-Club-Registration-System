@@ -409,7 +409,7 @@ async function quickVerifyStudent() {
                 state.myGradesFilterOnly = true;
             }
 
-            showToast(`ยินดีต้อนรับคุณ ${data.first_name} ${data.last_name} (${data.level})! ระบบคัดกรองระดับชั้น ${levelPrefix} ให้โดยอัตโนมัติแล้ว`, "success");
+            showToast(`ยินดีต้อนรับคุณ ${data.prefix || ""}${data.first_name} ${data.last_name} (${data.level})! ระบบคัดกรองระดับชั้น ${levelPrefix} ให้โดยอัตโนมัติแล้ว`, "success");
             
             // รีเรนเดอร์บอร์ดแสดงรายชื่อชุมนุมใหม่
             renderClubsGrid();
@@ -446,6 +446,7 @@ function openRegistrationModal(clubId) {
     // ดึงค่าจากหน้าแรกเพื่อพรีฟิล
     const quickId = document.getElementById("student-quick-id") ? document.getElementById("student-quick-id").value.trim() : "";
     document.getElementById("student-id-input").value = quickId;
+    document.getElementById("prefix-input").value = "";
     document.getElementById("first-name-input").value = "";
     document.getElementById("last-name-input").value = "";
     document.getElementById("level-input").value = "";
@@ -458,6 +459,7 @@ function openRegistrationModal(clubId) {
     if (state.currentStudentInfo) {
         const data = state.currentStudentInfo;
         document.getElementById("student-id-input").value = data.student_id;
+        document.getElementById("prefix-input").value = data.prefix || "";
         document.getElementById("first-name-input").value = data.first_name;
         document.getElementById("last-name-input").value = data.last_name;
         document.getElementById("level-input").value = data.level;
@@ -465,10 +467,11 @@ function openRegistrationModal(clubId) {
         const alertBox = document.getElementById("verify-alert-box");
         alertBox.style.display = "flex";
         alertBox.className = "verification-alert verified";
+        const displayName = (data.prefix || "") + data.first_name + " " + data.last_name;
         alertBox.innerHTML = `
             <i class="fa-solid fa-circle-check"></i> 
             <div>
-                <strong>ยืนยันตัวตนสำเร็จ:</strong> ${data.first_name} ${data.last_name} (${data.level})<br>
+                <strong>ยืนยันตัวตนสำเร็จ:</strong> ${displayName} (${data.level})<br>
                 <span style="font-size:0.8rem; opacity:0.85;">ดึงข้อมูลการยืนยันตัวตนจากหน้าแรกอัตโนมัติ กดลงทะเบียนได้ทันที</span>
             </div>
         `;
@@ -520,15 +523,17 @@ async function verifyStudentID() {
             state.currentStudentInfo = data;
             
             alertBox.className = "verification-alert verified";
+            const displayName = (data.prefix || "") + data.first_name + " " + data.last_name;
             alertBox.innerHTML = `
                 <i class="fa-solid fa-circle-check"></i> 
                 <div>
-                    <strong>ยืนยันตัวตนสำเร็จ:</strong> ${data.first_name} ${data.last_name} (${data.level})<br>
+                    <strong>ยืนยันตัวตนสำเร็จ:</strong> ${displayName} (${data.level})<br>
                     <span style="font-size:0.8rem; opacity:0.85;">ข้อมูลถูกต้องตามทะเบียนราษฎร์โรงเรียน สามารถกดลงทะเบียนได้ทันที</span>
                 </div>
             `;
             
             // แอบอัปเดตข้อมูลและเก็บสถานะไว้
+            document.getElementById("prefix-input").value = data.prefix || "";
             document.getElementById("first-name-input").value = data.first_name;
             document.getElementById("last-name-input").value = data.last_name;
             document.getElementById("level-input").value = data.level;
@@ -545,11 +550,12 @@ async function verifyStudentID() {
                 <i class="fa-solid fa-triangle-exclamation"></i> 
                 <div>
                     <strong>ไม่พบเลขประจำตัวในระบบชั่วคราว:</strong> นักเรียนใหม่อาจจะยังไม่มีชื่อในฐานข้อมูลเดิม<br>
-                    <span style="font-weight:600;">โปรดกรอก ชื่อ-นามสกุล และเลือกห้องเรียนจริงที่แบบฟอร์มด้านล่างเพื่อจองสิทธิ์เข้าชุมนุมนี้ทันที!</span>
+                    <span style="font-weight:600;">โปรดกรอก คำนำหน้า ชื่อ-นามสกุล และเลือกห้องเรียนจริงที่แบบฟอร์มด้านล่างเพื่อจองสิทธิ์เข้าชุมนุมนี้ทันที!</span>
                 </div>
             `;
             
             // ล้างข้อมูลฟอร์มเดิมเพื่อความถูกต้อง
+            document.getElementById("prefix-input").value = "";
             document.getElementById("first-name-input").value = "";
             document.getElementById("last-name-input").value = "";
             document.getElementById("level-input").value = "";
@@ -569,6 +575,7 @@ async function submitStudentRegistration() {
     if (!supabaseClient || !state.currentClub) return;
 
     const studentId = document.getElementById("student-id-input").value.trim() || null;
+    let prefix = document.getElementById("prefix-input").value;
     let firstName = document.getElementById("first-name-input").value.trim();
     let lastName = document.getElementById("last-name-input").value.trim();
     let level = document.getElementById("level-input").value;
@@ -576,8 +583,8 @@ async function submitStudentRegistration() {
     const submitBtn = document.getElementById("submit-registration-btn");
 
     // 1. ตรวจสอบความครบถ้วนของข้อมูล
-    if (!firstName || !lastName || !level) {
-        showToast("กรุณากรอกข้อมูลนักเรียน ชื่อ-นามสกุล และห้องเรียนให้ครบถ้วน", "warning");
+    if (!prefix || !firstName || !lastName || !level) {
+        showToast("กรุณากรอกข้อมูลนักเรียน คำนำหน้าชื่อ ชื่อจริง นามสกุล และห้องเรียนให้ครบถ้วน", "warning");
         return;
     }
 
@@ -605,6 +612,7 @@ async function submitStudentRegistration() {
             const { data, error } = await supabaseClient.rpc("register_student_atomic", {
                 p_club_id: state.currentClub.id,
                 p_student_id: studentId,
+                p_prefix: prefix,
                 p_first_name: firstName,
                 p_last_name: lastName,
                 p_level: level,
@@ -623,7 +631,7 @@ async function submitStudentRegistration() {
 
                 // อัปเดตข้อมูลตั๋ว
                 document.getElementById("ticket-club-name").innerText = state.currentClub.name;
-                document.getElementById("ticket-student-name").innerText = `${firstName} ${lastName}`;
+                document.getElementById("ticket-student-name").innerText = `${prefix}${firstName} ${lastName}`;
                 document.getElementById("ticket-student-level").innerText = level;
                 document.getElementById("ticket-student-id").innerText = studentId || "นักเรียนใหม่ (รอการจัดเลข)";
                 document.getElementById("ticket-location-teacher").innerHTML = `<i class="fa-solid fa-location-dot"></i> ${state.currentClub.location} &nbsp;&nbsp;&nbsp; <i class="fa-solid fa-user-tie"></i> ${state.currentClub.teacher}`;
@@ -739,7 +747,7 @@ async function searchStudentRegistrations() {
                 const row = document.createElement("tr");
                 row.innerHTML = `
                     <td><strong>${reg.student_id || "นักเรียนใหม่"}</strong></td>
-                    <td>${reg.first_name} ${reg.last_name}</td>
+                    <td>${reg.prefix || ""}${reg.first_name} ${reg.last_name}</td>
                     <td>${reg.level}</td>
                     <td style="color:var(--accent-mint); font-weight:600;">${reg.clubs ? reg.clubs.name : "ไม่ระบุ"}</td>
                     <td>${reg.clubs ? reg.clubs.teacher : "ไม่ระบุ"}</td>
@@ -845,7 +853,7 @@ async function handleClubSelectChange(event) {
                 const row = document.createElement("tr");
                 row.innerHTML = `
                     <td><strong>${reg.student_id || "นักเรียนใหม่"}</strong></td>
-                    <td>${reg.first_name} ${reg.last_name}</td>
+                    <td>${reg.prefix || ""}${reg.first_name} ${reg.last_name}</td>
                     <td>${reg.level}</td>
                     <td style="color:var(--accent-mint); font-weight:600;">${reg.clubs ? reg.clubs.name : "ไม่ระบุ"}</td>
                     <td>${reg.clubs ? reg.clubs.teacher : "ไม่ระบุ"}</td>
@@ -1038,8 +1046,9 @@ function renderAdminPendingStudents() {
         const clubName = reg.clubs ? reg.clubs.name : "ไม่พบประวัติ";
 
         const row = document.createElement("tr");
+        const fullName = (reg.prefix || "") + reg.first_name + " " + reg.last_name;
         row.innerHTML = `
-            <td><strong>${reg.first_name} ${reg.last_name}</strong></td>
+            <td><strong>${fullName}</strong></td>
             <td>${reg.level}</td>
             <td style="color:var(--accent-mint); font-weight:600;">${clubName}</td>
             <td>
@@ -1410,6 +1419,7 @@ async function loadStudentsList() {
                 const row = document.createElement("tr");
                 row.innerHTML = `
                     <td><strong>${std.student_id}</strong></td>
+                    <td>${std.prefix || "-"}</td>
                     <td>${std.first_name}</td>
                     <td>${std.last_name}</td>
                     <td>${std.level}</td>
@@ -1417,14 +1427,14 @@ async function loadStudentsList() {
                 tbody.appendChild(row);
             });
         } else {
-            tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 1.5rem 0;">ไม่พบข้อมูลนักเรียนที่ตรงตามเงื่อนไขการค้นหา</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 1.5rem 0;">ไม่พบข้อมูลนักเรียนที่ตรงตามเงื่อนไขการค้นหา</td></tr>`;
         }
 
         // ดึงรายการห้องทั้งหมดมาใส่ใน dropdown
         await populateStudentLevelDropdown();
     } catch (e) {
         console.error("Error loading students list:", e);
-        tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--status-danger);">ไม่สามารถดาวน์โหลดรายชื่อจากฐานข้อมูลได้</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--status-danger);">ไม่สามารถดาวน์โหลดรายชื่อจากฐานข้อมูลได้</td></tr>`;
     }
 }
 
@@ -1457,20 +1467,51 @@ async function handleStudentCSVImport(event) {
                 return;
             }
 
+            const headers = rows[0] ? rows[0].map(h => String(h).trim().toLowerCase()) : [];
+            
+            // Map headers to indexes
+            let studentIdIdx = headers.findIndex(h => h.includes('student_id') || h.includes('รหัสประจำตัว') || h.includes('เลขประจำตัว'));
+            let prefixIdx = headers.findIndex(h => h.includes('prefix') || h.includes('คำนำหน้า'));
+            let firstNameIdx = headers.findIndex(h => h.includes('first_name') || h.includes('ชื่อจริง') || h.includes('ชื่อ'));
+            let lastNameIdx = headers.findIndex(h => h.includes('last_name') || h.includes('นามสกุล'));
+            let levelIdx = headers.findIndex(h => h.includes('level') || h.includes('ชั้นเรียน') || h.includes('ห้องเรียน') || h.includes('ระดับชั้น'));
+
+            // Fallback to defaults if headers were not parsed or missing
+            if (studentIdIdx === -1) studentIdIdx = 0;
+            if (firstNameIdx === -1) {
+                const totalCols = rows[0] ? rows[0].length : 4;
+                if (totalCols >= 5) {
+                    prefixIdx = 1;
+                    firstNameIdx = 2;
+                    lastNameIdx = 3;
+                    levelIdx = 4;
+                } else {
+                    prefixIdx = -1;
+                    firstNameIdx = 1;
+                    lastNameIdx = 2;
+                    levelIdx = 3;
+                }
+            } else {
+                if (lastNameIdx === -1) lastNameIdx = firstNameIdx + 1;
+                if (levelIdx === -1) levelIdx = lastNameIdx + 1;
+            }
+
             const batch = [];
             // วนลูปอ่านข้อมูลข้ามแถวแรก (Headers)
             for (let i = 1; i < rows.length; i++) {
                 const row = rows[i];
                 if (!row || row.length === 0) continue;
                 
-                const student_id = row[0] ? String(row[0]).trim() : '';
-                const first_name = row[1] ? String(row[1]).trim() : '';
-                const last_name = row[2] ? String(row[2]).trim() : '';
-                const level = row[3] ? String(row[3]).trim() : '';
+                const student_id = row[studentIdIdx] ? String(row[studentIdIdx]).trim() : '';
+                const prefix = prefixIdx !== -1 && row[prefixIdx] ? String(row[prefixIdx]).trim() : '';
+                const first_name = row[firstNameIdx] ? String(row[firstNameIdx]).trim() : '';
+                const last_name = row[lastNameIdx] ? String(row[lastNameIdx]).trim() : '';
+                const level = row[levelIdx] ? String(row[levelIdx]).trim() : '';
 
                 if (student_id && first_name) {
                     batch.push({
                         student_id: student_id,
+                        prefix: prefix || null,
                         first_name: first_name,
                         last_name: last_name,
                         level: level
@@ -1599,11 +1640,11 @@ function downloadStudentTemplate() {
     }
 
     const data = [
-        ["student_id", "first_name", "last_name", "level"],
-        ["10001", "สมชาย", "ใจดี", "ม.4/1"],
-        ["10002", "สมหญิง", "รักเรียน", "ม.4/2"],
-        ["10003", "ศรัญญู", "มุ่งมั่น", "ม.5/3"],
-        ["10004", "นภาพร", "เรียนดี", "ม.6/1"]
+        ["student_id", "prefix", "first_name", "last_name", "level"],
+        ["10001", "เด็กชาย", "สมชาย", "ใจดี", "ม.1/1"],
+        ["10002", "เด็กหญิง", "สมหญิง", "รักเรียน", "ม.1/2"],
+        ["10003", "นาย", "ศรัญญู", "มุ่งมั่น", "ม.4/3"],
+        ["10004", "นางสาว", "นภาพร", "เรียนดี", "ม.5/1"]
     ];
 
     const ws = XLSX.utils.aoa_to_sheet(data);
@@ -1611,6 +1652,7 @@ function downloadStudentTemplate() {
     // ตั้งค่าความกว้างคอลัมน์ให้อ่านง่าย
     ws['!cols'] = [
         { wch: 15 }, // student_id
+        { wch: 10 }, // prefix
         { wch: 15 }, // first_name
         { wch: 15 }, // last_name
         { wch: 10 }  // level
@@ -1767,7 +1809,7 @@ function exportAllRegistrationsToCSV() {
     }
 
     // สร้าง Header ภาษาไทย
-    let csvContent = "เลขประจำตัวนักเรียน,ชื่อ,นามสกุล,ระดับชั้น/ห้อง,สถานะสิทธิ์,ชุมนุมที่เลือกเรียน,ครูผู้สอน,สถานที่เรียน,วันเวลาลงทะเบียน\n";
+    let csvContent = "เลขประจำตัวนักเรียน,คำนำหน้า,ชื่อ,นามสกุล,ระดับชั้น/ห้อง,สถานะสิทธิ์,ชุมนุมที่เลือกเรียน,ครูผู้สอน,สถานที่เรียน,วันเวลาลงทะเบียน\n";
 
     state.registrations.forEach(r => {
         const studentId = r.student_id || "นักเรียนใหม่";
@@ -1777,7 +1819,7 @@ function exportAllRegistrationsToCSV() {
         const teacherName = r.clubs ? r.clubs.teacher : "ไม่ระบุ";
         const loc = r.clubs ? r.clubs.location : "ไม่ระบุ";
 
-        csvContent += `"${studentId}","${r.first_name}","${r.last_name}","${r.level}","${status}","${clubName}","${teacherName}","${loc}","${date}"\n`;
+        csvContent += `"${studentId}","${r.prefix || ""}","${r.first_name}","${r.last_name}","${r.level}","${status}","${clubName}","${teacherName}","${loc}","${date}"\n`;
     });
 
     downloadCSVFile(csvContent, `รายงานการลงทะเบียนชุมนุมทั้งหมด_${state.settings.school_config.semester.replace('/', '-')}.csv`);
@@ -1791,14 +1833,14 @@ function exportSingleClubToCSV(clubId, clubName) {
         return;
     }
 
-    let csvContent = "เลขประจำตัวนักเรียน,ชื่อ,นามสกุล,ระดับชั้น/ห้อง,สถานะสิทธิ์,วันเวลาลงทะเบียน\n";
+    let csvContent = "เลขประจำตัวนักเรียน,คำนำหน้า,ชื่อ,นามสกุล,ระดับชั้น/ห้อง,สถานะสิทธิ์,วันเวลาลงทะเบียน\n";
 
     clubRegs.forEach(r => {
         const studentId = r.student_id || "นักเรียนใหม่";
         const status = r.registration_status === 'verified' ? 'ยืนยันตัวตนสำเร็จ' : 'สำรองสิทธิ์ (Pending)';
         const date = new Date(r.created_at).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" }).replace(",", "");
 
-        csvContent += `"${studentId}","${r.first_name}","${r.last_name}","${r.level}","${status}","${date}"\n`;
+        csvContent += `"${studentId}","${r.prefix || ""}","${r.first_name}","${r.last_name}","${r.level}","${status}","${date}"\n`;
     });
 
     downloadCSVFile(csvContent, `รายชื่อชุมนุม_${clubName}.csv`);

@@ -1,36 +1,16 @@
 -- =====================================================================
--- 🛡️ MIGRATION SCRIPT: ADD AUDIT LOGS & UPDATE RPC (CONCURRENCY SAFE)
+-- 🛡️ MIGRATION SCRIPT: ADD TITLE PREFIX & UPDATE ATOMIC REGISTER FUNCTION
 -- คัดลอกเฉพาะสคริปต์นี้ไปรันในช่อง SQL Editor ของ Supabase เพื่ออัปเกรดระบบโดยไม่สูญเสียข้อมูลเดิม!
 -- =====================================================================
 
--- 1. สร้างตารางบันทึกประวัติความปลอดภัยและการกระทำระบบ (Audit Logs)
-CREATE TABLE IF NOT EXISTS audit_logs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    student_id TEXT, -- รหัสนักเรียนที่เกี่ยวข้อง
-    student_name TEXT, -- ชื่อนักเรียนที่เกี่ยวข้อง
-    action TEXT NOT NULL, -- กิจกรรม (เช่น REGISTER_SUCCESS, REGISTER_PENDING, REGISTRATION_DELETED, PENDING_APPROVED, PENDING_REJECTED)
-    club_name TEXT, -- ชื่อชุมนุม
-    ip_address TEXT, -- IP ของผู้ใช้งาน
-    user_agent TEXT, -- เบราว์เซอร์และอุปกรณ์
-    details TEXT, -- รายละเอียดเพิ่มเติม
-    created_at TIMESTAMPTZ DEFAULT now()
-);
+-- 1. เพิ่มคอลัมน์ prefix ให้ตาราง students และ registrations หากยังไม่มี
+ALTER TABLE students ADD COLUMN IF NOT EXISTS prefix TEXT;
+ALTER TABLE registrations ADD COLUMN IF NOT EXISTS prefix TEXT;
 
--- เปิดใช้งาน RLS สำหรับ audit_logs
-ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
-
--- ลบ Policy เดิมหากเคยสร้างไว้
-DROP POLICY IF EXISTS "Allow public insert access to audit_logs" ON audit_logs;
-DROP POLICY IF EXISTS "Allow read access to audit_logs for admin" ON audit_logs;
-
--- สร้างสิทธิ์การเข้าใช้งาน
-CREATE POLICY "Allow public insert access to audit_logs" ON audit_logs FOR INSERT WITH CHECK (true);
-CREATE POLICY "Allow read access to audit_logs for admin" ON audit_logs FOR SELECT USING (true);
-
-
--- 2. ปรับปรุง Stored Procedure ให้รองรับการบันทึก IP และ User Agent ลงใน Audit Logs อัตโนมัติ พร้อมรองรับคำนำหน้าชื่อ (Prefix)
+-- 2. ลบ Stored Procedure ตัวเก่าออกเพื่อป้องกันการซ้ำซ้อน (Signature Overloading)
 DROP FUNCTION IF EXISTS register_student_atomic(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT);
 
+-- 3. สร้าง Stored Procedure ตัวใหม่ที่มี 8 พารามิเตอร์ (เพิ่ม p_prefix)
 CREATE OR REPLACE FUNCTION register_student_atomic(
     p_club_id UUID,
     p_student_id TEXT,
