@@ -491,28 +491,30 @@ function updateQuickVerifyUI() {
         const displayName = `${data.prefix || ""}${data.first_name} ${data.last_name}`;
         
         wrapper.innerHTML = `
-            <label style="color: var(--accent-mint); font-size: 0.85rem; font-weight: 600; display: flex; align-items: center; gap: 6px;">
-                <i class="fa-solid fa-circle-check"></i> ยืนยันตัวตน/เตรียมข้อมูลสำเร็จแล้ว
-            </label>
-            <div style="background: rgba(52, 211, 153, 0.1); border: 1px solid rgba(52, 211, 153, 0.35); border-radius: 6px; padding: 6px 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; height: 38px; box-sizing: border-box; width: 100%;">
-                <div style="display: flex; flex-direction: column; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; flex: 1; text-align: left;">
-                    <span style="font-size: 0.82rem; font-weight: 600; color: var(--text-primary); text-overflow: ellipsis; overflow: hidden;" title="${displayName}">${displayName}</span>
-                    <span style="font-size: 0.68rem; color: var(--text-secondary);">ระดับชั้น ${data.level} | รหัส: ${data.student_id}</span>
+            <div class="identity-card-header" style="color: var(--accent-mint);">
+                <i class="fa-solid fa-circle-check"></i>
+                <span>ยืนยันตัวตนสำเร็จ</span>
+            </div>
+            <div style="background: rgba(52, 211, 153, 0.08); border: 1px solid rgba(52, 211, 153, 0.3); border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+                <div style="display: flex; flex-direction: column; overflow: hidden; flex: 1; text-align: left;">
+                    <span style="font-size: 0.95rem; font-weight: 700; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${displayName}">${displayName}</span>
+                    <span style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">ระดับชั้น ${data.level} | รหัส: ${data.student_id}</span>
                 </div>
-                <button onclick="clearStudentVerification()" title="ยกเลิกการระบุตัวตน" style="background: none; border: none; color: rgba(239, 68, 68, 0.85); cursor: pointer; padding: 4px 6px; font-size: 0.95rem; display: flex; align-items: center; justify-content: center; transition: all 0.2s;" onmouseover="this.style.color='#ef4444'; this.style.transform='scale(1.15)';" onmouseout="this.style.color='rgba(239, 68, 68, 0.85)'; this.style.transform='scale(1)';">
+                <button onclick="clearStudentVerification()" title="ยกเลิกการระบุตัวตน" style="background: none; border: none; color: rgba(239, 68, 68, 0.8); cursor: pointer; padding: 6px; font-size: 1.1rem; display: flex; align-items: center; transition: all 0.2s;" onmouseover="this.style.color='#ef4444'; this.style.transform='scale(1.15)';" onmouseout="this.style.color='rgba(239, 68, 68, 0.8)'; this.style.transform='scale(1)';">
                     <i class="fa-solid fa-right-from-bracket"></i>
                 </button>
             </div>
         `;
     } else if (state.isNewStudentPreRegistering) {
         wrapper.innerHTML = `
-            <label style="color: var(--accent-mint); font-size: 0.85rem; font-weight: 600; display: flex; align-items: center; gap: 6px;">
-                <i class="fa-solid fa-user-plus"></i> เตรียมข้อมูลนักเรียนใหม่
-            </label>
-            <div style="background: rgba(7, 23, 15, 0.7); border: 1px solid rgba(52, 211, 153, 0.4); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; gap: 8px;">
+            <div class="identity-card-header">
+                <i class="fa-solid fa-user-plus"></i>
+                <span>เตรียมข้อมูลนักเรียนใหม่</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
                 <div style="display: flex; gap: 6px;">
-                    <input type="text" id="quick-new-id" placeholder="เบอร์โทรศัพท์ 10 หลัก หรือ เลขบัตรปชช. 13 หลัก" style="background: rgba(7, 23, 15, 0.9); border: var(--border-glass); color: white; padding: 6px; border-radius: 4px; font-size: 0.8rem; flex: 1;">
-                    <select id="quick-prefix" style="background: rgba(7, 23, 15, 0.9); border: var(--border-glass); color: white; padding: 6px; border-radius: 4px; font-size: 0.8rem; width: 38%;">
+                    <input type="text" id="quick-new-id" placeholder="เบอร์โทร 10 หลัก หรือ เลขบัตร 13 หลัก" style="background: rgba(7,23,15,0.6); border: var(--border-glass); color: white; padding: 8px 10px; border-radius: 8px; font-size: 0.85rem; flex: 1;">
+                    <select id="quick-prefix" style="background: rgba(7,23,15,0.6); border: var(--border-glass); color: white; padding: 8px; border-radius: 8px; font-size: 0.85rem; width: 38%;">
                         <option value="">คำนำหน้า</option>
                         <option value="เด็กชาย">เด็กชาย</option>
                         <option value="เด็กหญิง">เด็กหญิง</option>
@@ -521,16 +523,16 @@ function updateQuickVerifyUI() {
                     </select>
                 </div>
                 <div style="display: flex; gap: 6px;">
-                    <input type="text" id="quick-firstname" placeholder="ชื่อจริง" style="background: rgba(7, 23, 15, 0.9); border: var(--border-glass); color: white; padding: 6px; border-radius: 4px; font-size: 0.8rem; flex: 1;">
-                    <input type="text" id="quick-lastname" placeholder="นามสกุล" style="background: rgba(7, 23, 15, 0.9); border: var(--border-glass); color: white; padding: 6px; border-radius: 4px; font-size: 0.8rem; flex: 1;">
+                    <input type="text" id="quick-firstname" placeholder="ชื่อจริง" style="background: rgba(7,23,15,0.6); border: var(--border-glass); color: white; padding: 8px 10px; border-radius: 8px; font-size: 0.85rem; flex: 1;">
+                    <input type="text" id="quick-lastname" placeholder="นามสกุล" style="background: rgba(7,23,15,0.6); border: var(--border-glass); color: white; padding: 8px 10px; border-radius: 8px; font-size: 0.85rem; flex: 1;">
                 </div>
-                <select id="quick-level" style="background: rgba(7, 23, 15, 0.9); border: var(--border-glass); color: white; padding: 6px; border-radius: 4px; font-size: 0.8rem; width: 100%;">
+                <select id="quick-level" style="background: rgba(7,23,15,0.6); border: var(--border-glass); color: white; padding: 8px; border-radius: 8px; font-size: 0.85rem; width: 100%;">
                     <option value="">เลือกระดับชั้น/ห้อง...</option>
                 </select>
-                <input type="text" id="quick-level-custom" placeholder="ระบุชั้น/ห้องเรียนเอง เช่น ม.4/5" style="display: none; background: rgba(7, 23, 15, 0.9); border: 1px solid var(--accent-mint); color: white; padding: 6px; border-radius: 4px; font-size: 0.8rem; width: 100%;">
+                <input type="text" id="quick-level-custom" placeholder="ระบุชั้น/ห้องเรียนเอง เช่น ม.4/5" style="display: none; background: rgba(7,23,15,0.6); border: 1px solid var(--accent-mint); color: white; padding: 8px 10px; border-radius: 8px; font-size: 0.85rem; width: 100%;">
                 <div style="display: flex; gap: 6px; margin-top: 2px;">
-                    <button class="btn-primary" onclick="saveQuickNewStudent()" style="flex: 1; padding: 6px; font-size: 0.85rem; border-radius: 4px; display: flex; justify-content: center; height: 32px;"><i class="fa-solid fa-save" style="margin-right: 5px;"></i> บันทึกข้อมูล</button>
-                    <button class="btn-secondary" onclick="cancelQuickNewStudent()" style="padding: 6px 12px; font-size: 0.85rem; border-radius: 4px; height: 32px;">ยกเลิก</button>
+                    <button onclick="saveQuickNewStudent()" style="flex: 1; padding: 9px; font-size: 0.85rem; border-radius: 8px; display: flex; align-items:center; justify-content: center; gap: 6px; background: var(--accent-mint); border: none; color: #07170f; cursor: pointer; font-weight: 700; transition: all 0.2s;"><i class="fa-solid fa-save"></i> บันทึกข้อมูล</button>
+                    <button onclick="cancelQuickNewStudent()" style="padding: 9px 14px; font-size: 0.85rem; border-radius: 8px; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: #fca5a5; cursor: pointer; transition: all 0.2s;">ยกเลิก</button>
                 </div>
             </div>
         `;
@@ -553,17 +555,22 @@ function updateQuickVerifyUI() {
         });
     } else {
         wrapper.innerHTML = `
-            <label for="student-quick-id">ระบุตัวตน (สำหรับนักเรียนที่มีรหัส)</label>
-            <div style="display: flex; gap: 6px; width: 100%;">
-                <input type="text" id="student-quick-id" placeholder="รหัสประจำตัว 5 หลัก..." 
+            <div class="identity-card-header">
+                <i class="fa-solid fa-id-card"></i>
+                <span>ระบุตัวตนก่อนเลือกชุมนุม</span>
+            </div>
+            <label for="student-quick-id" style="font-size:0.8rem; color: var(--text-secondary); margin-bottom: 4px; display:block;">นักเรียนที่มีรหัสประจำตัว</label>
+            <div style="display: flex; gap: 6px;">
+                <input type="text" id="student-quick-id" placeholder="รหัสประจำตัว 5 หลัก..."
                        onkeyup="handleQuickIdKeyPress(event)"
-                       style="background: rgba(7, 23, 15, 0.7); border: var(--border-glass); color: var(--text-primary); padding: 8px 10px; border-radius: 6px; font-size: 0.9rem; flex: 1;">
-                <button class="btn-primary" onclick="quickVerifyStudent()" style="padding: 0 10px; border-radius: 6px; font-size: 0.85rem; height: 38px; display: flex; align-items: center; justify-content: center; background: var(--accent-mint); border: none; color: #07170f; cursor: pointer; transition: all 0.2s ease;">
+                       style="background: rgba(7,23,15,0.6); border: var(--border-glass); color: var(--text-primary); padding: 9px 12px; border-radius: 8px; font-size: 1rem; flex: 1;">
+                <button onclick="quickVerifyStudent()" title="ตรวจสอบรหัส" style="padding: 0 14px; border-radius: 8px; height: 42px; display: flex; align-items: center; justify-content: center; background: var(--accent-mint); border: none; color: #07170f; cursor: pointer; font-size: 1rem; transition: all 0.2s; font-weight: 700;">
                     <i class="fa-solid fa-user-check"></i>
                 </button>
             </div>
-            <button class="btn-secondary" onclick="openNewStudentPreRegister()" style="margin-top: 8px; font-size: 0.8rem; padding: 6px; border: 1px dashed var(--accent-mint); color: var(--accent-mint); background: rgba(52, 211, 153, 0.05); width: 100%; justify-content: center; border-radius: 6px; transition: all 0.2s; cursor: pointer;">
-                <i class="fa-solid fa-user-plus"></i> นักเรียนใหม่? คลิกเพื่อกรอกประวัติเตรียมจอง
+            <div class="identity-divider"><span>หรือ</span></div>
+            <button onclick="openNewStudentPreRegister()" style="font-size: 0.85rem; padding: 9px 12px; border: 1px dashed var(--accent-mint); color: var(--accent-mint); background: rgba(52,211,153,0.05); width: 100%; display:flex; align-items:center; justify-content: center; gap: 8px; border-radius: 8px; cursor: pointer; transition: all 0.2s; font-weight: 600;" onmouseover="this.style.background='rgba(52,211,153,0.12)'" onmouseout="this.style.background='rgba(52,211,153,0.05)'">
+                <i class="fa-solid fa-user-plus"></i> นักเรียนใหม่ — กรอกประวัติเตรียมจอง
             </button>
         `;
     }
