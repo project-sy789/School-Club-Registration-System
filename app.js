@@ -438,6 +438,8 @@ async function quickVerifyStudent() {
                 state.myGradesFilterOnly = true;
             }
 
+            updateQuickVerifyUI();
+
             showToast(`ยินดีต้อนรับคุณ ${data.prefix || ""}${data.first_name} ${data.last_name} (${data.level})! ระบบคัดกรองระดับชั้น ${levelPrefix} ให้โดยอัตโนมัติแล้ว`, "success");
             
             // รีเรนเดอร์บอร์ดแสดงรายชื่อชุมนุมใหม่
@@ -445,6 +447,7 @@ async function quickVerifyStudent() {
         } else {
             showToast("ไม่พบรหัสประจำตัวนักเรียนนี้ในฐานข้อมูล (หากเป็นเด็กย้ายเข้าใหม่ สามารถกรอกสมัครมือได้หลังจากกดปุ่มลงทะเบียนเรียนครับ)", "warning");
             state.currentStudentInfo = null;
+            updateQuickVerifyUI();
         }
     } catch (e) {
         console.error("Error doing quick verify:", e);
@@ -457,6 +460,65 @@ function handleQuickIdKeyPress(event) {
         quickVerifyStudent();
     }
 }
+
+// 🔄 อัปเดตส่วนแสดงผลการระบุตัวตนที่หน้าแรก (Quick Verify UI Profile Badge)
+function updateQuickVerifyUI() {
+    const wrapper = document.getElementById("quick-verify-wrapper");
+    if (!wrapper) return;
+
+    if (state.currentStudentInfo) {
+        const data = state.currentStudentInfo;
+        const displayName = `${data.prefix || ""}${data.first_name} ${data.last_name}`;
+        
+        wrapper.innerHTML = `
+            <label style="color: var(--accent-mint); font-size: 0.85rem; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                <i class="fa-solid fa-circle-check"></i> ยืนยันตัวตนสำเร็จแล้ว
+            </label>
+            <div style="background: rgba(52, 211, 153, 0.1); border: 1px solid rgba(52, 211, 153, 0.35); border-radius: 6px; padding: 6px 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; height: 38px; box-sizing: border-box; width: 100%;">
+                <div style="display: flex; flex-direction: column; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; flex: 1; text-align: left;">
+                    <span style="font-size: 0.82rem; font-weight: 600; color: var(--text-primary); text-overflow: ellipsis; overflow: hidden;" title="${displayName}">${displayName}</span>
+                    <span style="font-size: 0.68rem; color: var(--text-secondary);">ระดับชั้น ${data.level} | รหัส: ${data.student_id}</span>
+                </div>
+                <button onclick="clearStudentVerification()" title="ยกเลิกการระบุตัวตน" style="background: none; border: none; color: rgba(239, 68, 68, 0.85); cursor: pointer; padding: 4px 6px; font-size: 0.95rem; display: flex; align-items: center; justify-content: center; transition: all 0.2s;" onmouseover="this.style.color='#ef4444'; this.style.transform='scale(1.15)';" onmouseout="this.style.color='rgba(239, 68, 68, 0.85)'; this.style.transform='scale(1)';">
+                    <i class="fa-solid fa-right-from-bracket"></i>
+                </button>
+            </div>
+        `;
+    } else {
+        wrapper.innerHTML = `
+            <label for="student-quick-id">ระบุตัวตน (กรอกรหัสเพื่อคัดกรองออโต้)</label>
+            <div style="display: flex; gap: 6px; width: 100%;">
+                <input type="text" id="student-quick-id" placeholder="รหัส 5 หลัก..." 
+                       onkeyup="handleQuickIdKeyPress(event)"
+                       style="background: rgba(7, 23, 15, 0.7); border: var(--border-glass); color: var(--text-primary); padding: 8px 10px; border-radius: 6px; font-size: 0.9rem; flex: 1;">
+                <button class="btn-primary" onclick="quickVerifyStudent()" style="padding: 0 10px; border-radius: 6px; font-size: 0.85rem; height: 38px; display: flex; align-items: center; justify-content: center; background: var(--accent-mint); border: none; color: #07170f; cursor: pointer; transition: all 0.2s ease;">
+                    <i class="fa-solid fa-user-check"></i>
+                </button>
+            </div>
+        `;
+    }
+}
+
+// 🔓 ยกเลิกการระบุตัวตนของนักเรียน
+function clearStudentVerification() {
+    state.currentStudentInfo = null;
+    
+    // รีเซ็ตค่าการคัดกรองต่าง ๆ กลับเป็นปกติ
+    document.getElementById("filter-grade").value = "all";
+    const checkbox = document.getElementById("my-grades-only");
+    if (checkbox) {
+        checkbox.checked = false;
+        state.myGradesFilterOnly = false;
+    }
+    
+    updateQuickVerifyUI();
+    renderClubsGrid();
+    showToast("ยกเลิกการยืนยันตัวตน เรียบร้อยแล้ว", "info");
+}
+
+// ผูกฟังก์ชันเข้ากับ Global window เพื่อให้กดเรียกใช้งานได้เสมอในทุกเบราวเซอร์ (เช่น Safari WebKit)
+window.clearStudentVerification = clearStudentVerification;
+window.updateQuickVerifyUI = updateQuickVerifyUI;
 
 // =====================================================================
 // 📝 5. STUDENT REGISTRATION FLOW (ATOMIC & CONCURRENCY SAFE)
@@ -570,9 +632,13 @@ async function verifyStudentID() {
             // อัปเดต UI คัดกรองของระดับชั้นนั้นทันทีเพื่อความสะดวก
             const userGradePrefix = data.level.split('/')[0];
             document.getElementById("filter-grade").value = userGradePrefix;
+            
+            // อัปเดตส่วนคัดกรองหน้าแรกด้วย
+            updateQuickVerifyUI();
         } else {
             // 🔵 เคสที่ 2: ไม่พบรายชื่อ (นักเรียนใหม่ / ย้ายคลาส) -> เปิดให้กรอกเอง
             state.currentStudentInfo = null;
+            updateQuickVerifyUI();
             
             alertBox.className = "verification-alert pending";
             alertBox.innerHTML = `
@@ -602,6 +668,7 @@ async function verifyStudentID() {
 // 🔵 สลับเข้าโหมดกรอกข้อมูลด้วยตนเองสำหรับนักเรียนใหม่/ไม่มีเลขประจำตัว
 function enableNewStudentManualEntry() {
     state.currentStudentInfo = null;
+    updateQuickVerifyUI();
     document.getElementById("student-id-input").value = "";
     
     const alertBox = document.getElementById("verify-alert-box");
