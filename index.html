@@ -235,6 +235,9 @@
                     <button class="admin-tab-btn" id="admin-menu-students" onclick="switchAdminSubTab('students')">
                         <i class="fa-solid fa-users"></i> นำเข้าข้อมูลนักเรียน
                     </button>
+                    <button class="admin-tab-btn" id="admin-menu-bulkregs" onclick="switchAdminSubTab('bulkregs')">
+                        <i class="fa-solid fa-file-import"></i> นำเข้าลงทะเบียนชุมนุม
+                    </button>
                     <button class="admin-tab-btn" id="admin-menu-settings" onclick="switchAdminSubTab('settings')">
                         <i class="fa-solid fa-sliders"></i> ตั้งค่าเปิด-ปิดระบบ
                     </button>
@@ -436,6 +439,47 @@
                                     </tbody>
                                 </table>
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- Sub-Tab 4.5: Bulk Import Registrations (นำเข้าลงทะเบียนชุมนุม) -->
+                    <div id="admin-sub-bulkregs" class="admin-sub-view" style="display: none;">
+                        <div class="admin-content-header">
+                            <div>
+                                <h3>นำเข้ารายชื่อลงทะเบียนชุมนุมแบบ Bulk</h3>
+                                <p style="color: var(--text-secondary); font-size: 0.9rem;">
+                                    อัปโหลดไฟล์ Excel/CSV เพื่อลงทะเบียนนักเรียนเข้าชุมนุมหลายคนพร้อมกัน — <strong>ไม่จำเป็นต้องนำเข้านักเรียนให้ครบก่อน</strong>:
+                                    แถวที่รหัสตรงกับฐานข้อมูลนักเรียนจะเป็น <span style="color: var(--accent-mint); font-weight:600;">verified</span> ทันที,
+                                    แถวที่ไม่ตรงจะเป็น <span style="color: var(--status-warning); font-weight:600;">pending</span> ให้ครูยืนยันสิทธิ์ภายหลังในแท็บ "จัดการเด็กสมัครใหม่"
+                                </p>
+                            </div>
+                            <button class="btn-small-success" onclick="downloadRegistrationsTemplate()">
+                                <i class="fa-solid fa-download"></i> ดาวน์โหลดเทมเพลต Excel / CSV
+                            </button>
+                        </div>
+
+                        <div class="file-dropzone" onclick="document.getElementById('csv-registrations-file-input').click()">
+                            <i class="fa-solid fa-file-import" style="color: var(--accent-mint);"></i>
+                            <h4>ลากไฟล์ .csv หรือ .xlsx มาวางที่นี่ หรือคลิกเพื่ออัปโหลด</h4>
+                            <p style="color: var(--text-secondary); font-size: 0.85rem;">
+                                โครงสร้างคอลัมน์: <strong>student_id, prefix, first_name, last_name, level, club_name</strong>
+                                <br>(<code>club_name</code> ต้องตรงกับชื่อชุมนุมที่มีอยู่ในระบบ — ตรวจสอบแบบ trim + ไม่สนตัวพิมพ์เล็ก-ใหญ่)
+                            </p>
+                            <input type="file" id="csv-registrations-file-input" accept=".csv, .xlsx, .xls" onchange="handleRegistrationsCSVImport(event)">
+                        </div>
+
+                        <div style="margin-top: 1rem; padding: 0.85rem 1rem; background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 8px; font-size: 0.85rem; color: var(--text-secondary);">
+                            <strong style="color: var(--status-warning);"><i class="fa-solid fa-circle-info"></i> หลักการประมวลผล:</strong>
+                            <ul style="margin: 6px 0 0 1.25rem; padding: 0;">
+                                <li>เคารพโควตาแต่ละชุมนุม — แถวที่ทำให้เกินจะถูกข้าม (skip) และแสดงเหตุผล</li>
+                                <li>ตรวจกันสมัครซ้ำ: ทั้งโดย <code>student_id</code> และโดย ชื่อ-นามสกุล</li>
+                                <li>ทำงานใน transaction เดียวฝั่ง PostgreSQL พร้อม Row Lock ป้องกัน race condition</li>
+                                <li>Bypass ช่วงเวลาเปิด-ปิดระบบ (เพราะเป็น admin action) ไม่ต้องเปิดระบบรับสมัครก่อน</li>
+                            </ul>
+                        </div>
+
+                        <div id="bulk-registrations-report" style="display: none; margin-top: 2rem;">
+                            <!-- รายงานผลการนำเข้าจะถูกเขียนด้วย JS หลังประมวลผลเสร็จ -->
                         </div>
                     </div>
 

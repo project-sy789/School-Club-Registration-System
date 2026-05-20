@@ -2139,6 +2139,244 @@ async function handleClubsCSVImport(event) {
     reader.readAsArrayBuffer(file);
 }
 
+// 🟢 อัปโหลดรายชื่อลงทะเบียนชุมนุม bulk import ผ่านหน้าบ้าน CSV/Excel
+// คอลัมน์: student_id, prefix, first_name, last_name, level, club_name
+// ไม่จำเป็นต้องนำเข้านักเรียนล่วงหน้า: แถวที่มีรหัสตรงกับตาราง students จะถูกตั้งเป็น verified,
+// ที่เหลือจะเป็น pending ให้ครูยืนยันสิทธิ์ภายหลังในแท็บ "จัดการเด็กสมัครใหม่"
+async function handleRegistrationsCSVImport(event) {
+    if (!supabaseClient) return;
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const fileExtension = file.name.split('.').pop().toLowerCase();
+    showToast("กำลังเริ่มวิเคราะห์ไฟล์รายชื่อลงทะเบียนชุมนุม...", "info");
+
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+        try {
+            let rows = [];
+            if (fileExtension === 'xlsx' || fileExtension === 'xls' || fileExtension === 'csv') {
+                if (typeof XLSX === 'undefined') {
+                    showToast("ไม่พบไลบรารีสำหรับประมวลผลไฟล์ Excel/CSV (SheetJS)", "error");
+                    return;
+                }
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const firstSheet = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheet];
+                rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+            } else {
+                showToast("ไม่รองรับรูปแบบไฟล์นี้ กรุณาใช้ไฟล์ .csv หรือ .xlsx", "error");
+                return;
+            }
+
+            const headers = rows[0] ? rows[0].map(h => String(h).trim().toLowerCase()) : [];
+
+            // Header detection อัจฉริยะ — รองรับทั้งภาษาไทยและอังกฤษ
+            let studentIdIdx = headers.findIndex(h => h.includes('student_id') || h.includes('รหัสประจำตัว') || h.includes('เลขประจำตัว'));
+            let prefixIdx = headers.findIndex(h => h.includes('prefix') || h.includes('คำนำหน้า'));
+            let firstNameIdx = headers.findIndex(h => h.includes('first_name') || h.includes('ชื่อจริง') || (h.includes('ชื่อ') && !h.includes('ชุมนุม') && !h.includes('นามสกุล')));
+            let lastNameIdx = headers.findIndex(h => h.includes('last_name') || h.includes('นามสกุล'));
+            let levelIdx = headers.findIndex(h => h.includes('level') || h.includes('ชั้นเรียน') || h.includes('ห้องเรียน') || h.includes('ระดับชั้น'));
+            let clubNameIdx = headers.findIndex(h => h.includes('club_name') || h.includes('ชุมนุม'));
+
+            // Fallback ตามตำแหน่งคอลัมน์เดิมหากไม่พบ header
+            if (studentIdIdx === -1) studentIdIdx = 0;
+            if (prefixIdx === -1) prefixIdx = 1;
+            if (firstNameIdx === -1) firstNameIdx = 2;
+            if (lastNameIdx === -1) lastNameIdx = 3;
+            if (levelIdx === -1) levelIdx = 4;
+            if (clubNameIdx === -1) clubNameIdx = 5;
+
+            const batch = [];
+            for (let i = 1; i < rows.length; i++) {
+                const row = rows[i];
+                if (!row || row.length === 0) continue;
+
+                const student_id = row[studentIdIdx] ? String(row[studentIdIdx]).trim() : '';
+                const prefix = row[prefixIdx] ? String(row[prefixIdx]).trim() : '';
+                const first_name = row[firstNameIdx] ? String(row[firstNameIdx]).trim() : '';
+                const last_name = row[lastNameIdx] ? String(row[lastNameIdx]).trim() : '';
+                const level = row[levelIdx] ? String(row[levelIdx]).trim() : '';
+                const club_name = row[clubNameIdx] ? String(row[clubNameIdx]).trim() : '';
+
+                // ต้องมีอย่างน้อยชื่อ + นามสกุล + ชุมนุม
+                if (first_name && last_name && club_name) {
+                    batch.push({
+                        student_id,
+                        prefix,
+                        first_name,
+                        last_name,
+                        level,
+                        club_name
+                    });
+                }
+            }
+
+            if (batch.length === 0) {
+                showToast("โครงสร้างไฟล์ไม่ถูกต้อง หรือไม่มีแถวข้อมูลที่สามารถนำเข้าได้ (ต้องมีอย่างน้อย ชื่อ, นามสกุล, ชุมนุม)", "error");
+                return;
+            }
+
+            showToast(`กำลังประมวลผลการลงทะเบียน ${batch.length} รายการ เข้าสู่ระบบฐานข้อมูล...`, "info");
+
+            // เรียก RPC ที่จัดการ atomic capacity + dedup + verified/pending ในฝั่ง Postgres
+            const ipAddress = await getUserIpAddress();
+            const userAgent = navigator.userAgent || "Unknown Device";
+
+            const { data, error } = await supabaseClient.rpc("bulk_register_atomic", {
+                p_rows: batch,
+                p_ip_address: ipAddress,
+                p_user_agent: userAgent
+            });
+
+            if (error) throw error;
+
+            const inserted = data?.inserted || 0;
+            const skipped = data?.skipped || [];
+            const failed = data?.failed || [];
+
+            // แสดง toast สรุปผล
+            let summaryType = "success";
+            let summary = `นำเข้าทะเบียนสำเร็จ ${inserted} รายการ`;
+            if (skipped.length > 0) summary += `, ข้าม ${skipped.length} รายการ`;
+            if (failed.length > 0) {
+                summary += `, ผิดพลาด ${failed.length} รายการ`;
+                summaryType = "warning";
+            }
+            if (inserted === 0 && (skipped.length > 0 || failed.length > 0)) {
+                summaryType = "error";
+            }
+            showToast(summary, summaryType);
+
+            // แสดงรายงานรายละเอียดในตาราง
+            renderBulkRegistrationReport(inserted, skipped, failed);
+
+            // โหลดข้อมูลใหม่ให้สดเสมอ
+            await loadClubsData();
+            if (state.isAdminLoggedIn) {
+                loadAdminDashboardData();
+            }
+        } catch (err) {
+            console.error("Error importing bulk registrations:", err);
+            showToast("เกิดข้อผิดพลาดในการนำเข้ารายชื่อลงทะเบียนชุมนุม: " + (err.message || err), "error");
+        } finally {
+            // เคลียร์ input file เผื่อให้เลือกไฟล์เดิมซ้ำได้
+            event.target.value = "";
+        }
+    };
+
+    reader.readAsArrayBuffer(file);
+}
+
+// 📊 แสดงรายงานผลการนำเข้าทะเบียนชุมนุม (รายการที่สำเร็จ/ข้าม/ผิดพลาด)
+function renderBulkRegistrationReport(inserted, skipped, failed) {
+    const reportBox = document.getElementById("bulk-registrations-report");
+    if (!reportBox) return;
+
+    const skippedRows = skipped.map(item => {
+        const r = item.row || {};
+        const name = `${r.prefix || ""}${r.first_name || ""} ${r.last_name || ""}`.trim() || "(ไม่ระบุชื่อ)";
+        return `<tr>
+            <td>${r.student_id || "-"}</td>
+            <td>${name}</td>
+            <td>${r.level || "-"}</td>
+            <td>${r.club_name || "-"}</td>
+            <td style="color: var(--status-warning);">${item.reason || "-"}</td>
+        </tr>`;
+    }).join("");
+
+    const failedRows = failed.map(item => {
+        const r = item.row || {};
+        const name = `${r.prefix || ""}${r.first_name || ""} ${r.last_name || ""}`.trim() || "(ไม่ระบุชื่อ)";
+        return `<tr>
+            <td>${r.student_id || "-"}</td>
+            <td>${name}</td>
+            <td>${r.level || "-"}</td>
+            <td>${r.club_name || "-"}</td>
+            <td style="color: var(--status-danger);">${item.reason || "-"}</td>
+        </tr>`;
+    }).join("");
+
+    reportBox.style.display = "block";
+    reportBox.innerHTML = `
+        <div style="display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem;">
+            <div class="stat-card" style="flex: 1; min-width: 180px;">
+                <div class="val" style="color: var(--accent-mint);">${inserted}</div>
+                <div class="lbl">ลงทะเบียนสำเร็จ</div>
+            </div>
+            <div class="stat-card" style="flex: 1; min-width: 180px;">
+                <div class="val" style="color: var(--status-warning);">${skipped.length}</div>
+                <div class="lbl">ข้าม (ซ้ำ/เต็มโควตา)</div>
+            </div>
+            <div class="stat-card" style="flex: 1; min-width: 180px;">
+                <div class="val" style="color: var(--status-danger);">${failed.length}</div>
+                <div class="lbl">ผิดพลาด</div>
+            </div>
+        </div>
+        ${(skipped.length + failed.length) === 0 ? `
+            <div style="text-align:center; color: var(--accent-mint); padding: 1rem; background: rgba(16,185,129,0.08); border-radius: 8px;">
+                <i class="fa-solid fa-circle-check"></i> นำเข้าครบทุกรายการโดยไม่มีปัญหา
+            </div>
+        ` : `
+            <h4 style="margin: 0.5rem 0;"><i class="fa-solid fa-triangle-exclamation" style="color: var(--status-warning);"></i> รายการที่ไม่ถูกนำเข้า</h4>
+            <div class="search-results-table-container" style="max-height: 300px; overflow-y: auto;">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>รหัสนักเรียน</th>
+                            <th>ชื่อ-นามสกุล</th>
+                            <th>ระดับชั้น</th>
+                            <th>ชุมนุม</th>
+                            <th>เหตุผล</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${skippedRows}${failedRows}
+                    </tbody>
+                </table>
+            </div>
+        `}
+    `;
+}
+
+// 📥 ดาวน์โหลดไฟล์เทมเพลตรายชื่อลงทะเบียนชุมนุม (.xlsx)
+function downloadRegistrationsTemplate() {
+    if (typeof XLSX === 'undefined') {
+        showToast("ไม่พบไลบรารีสำหรับประมวลผลไฟล์ Excel (SheetJS)", "error");
+        return;
+    }
+
+    const data = [
+        ["student_id", "prefix", "first_name", "last_name", "level", "club_name"],
+        ["10001", "นาย", "กิตติพงศ์", "ทองดี", "ม.4/1", "ชุมนุมคอมพิวเตอร์และวิทยาการคำนวณ"],
+        ["10002", "นางสาว", "ณัฏฐณิชา", "จิตอารีย์", "ม.4/1", "ชุมนุมดนตรีสากลและวงสตริง"],
+        ["", "เด็กชาย", "นักเรียนใหม่", "ยังไม่มีรหัส", "ม.1/2", "ชุมนุมศิลปะสร้างสรรค์และการออกแบบ"],
+        ["10015", "เด็กชาย", "พีรพล", "คงกระพัน", "ม.3/1", "ชุมนุมอนุรักษ์ธรรมชาติและสิ่งแวดล้อม"]
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(data);
+
+    ws['!cols'] = [
+        { wch: 12 }, // student_id
+        { wch: 10 }, // prefix
+        { wch: 18 }, // first_name
+        { wch: 18 }, // last_name
+        { wch: 10 }, // level
+        { wch: 40 }  // club_name
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "รายชื่อลงทะเบียนชุมนุม");
+
+    XLSX.writeFile(wb, "เทมเพลตรายชื่อลงทะเบียนชุมนุม.xlsx");
+    showToast("ดาวน์โหลดเทมเพลตรายชื่อลงทะเบียนชุมนุมสำเร็จ", "success");
+}
+
+// ผูกฟังก์ชันใหม่กับ window scope ให้ event handler บนหน้า HTML เรียกได้
+window.handleRegistrationsCSVImport = handleRegistrationsCSVImport;
+window.downloadRegistrationsTemplate = downloadRegistrationsTemplate;
+
 // 📥 ดาวน์โหลดไฟล์เทมเพลตรายชื่อนักเรียน (.xlsx)
 function downloadStudentTemplate() {
     if (typeof XLSX === 'undefined') {

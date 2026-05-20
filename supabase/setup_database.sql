@@ -284,6 +284,134 @@ $$;
 
 
 -- =====================================================================
+-- ⚡ STORED PROCEDURE: bulk_register_atomic
+-- ฟังก์ชันนำเข้ารายชื่อลงทะเบียนเรียนชุมนุมแบบ Bulk จากไฟล์ CSV/Excel ของผู้ดูแลระบบ
+-- ทำงานใน transaction เดียว ตัดยอด enrolled_count ทีละชุมนุมแบบ Row Lock เคารพโควตา
+-- ข้ามแถวที่ซ้ำหรือเต็ม (ไม่ทำให้ batch ทั้งก้อนล้ม) และคืน summary {inserted, skipped, failed}
+-- หมายเหตุ: bypass ช่วงเวลาเปิด-ปิดระบบ เพราะเป็นการกระทำของ admin
+-- =====================================================================
+CREATE OR REPLACE FUNCTION bulk_register_atomic(
+    p_rows JSONB,
+    p_ip_address TEXT DEFAULT NULL,
+    p_user_agent TEXT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_row JSONB;
+    v_club_id UUID;
+    v_club_name TEXT;
+    v_capacity INTEGER;
+    v_enrolled INTEGER;
+    v_input_club_name TEXT;
+    v_student_id_cleaned TEXT;
+    v_student_exists BOOLEAN;
+    v_first_name TEXT;
+    v_last_name TEXT;
+    v_prefix TEXT;
+    v_level TEXT;
+    v_status TEXT;
+    v_inserted_count INT := 0;
+    v_skipped JSONB := '[]'::jsonb;
+    v_failed JSONB := '[]'::jsonb;
+BEGIN
+    FOR v_row IN SELECT * FROM jsonb_array_elements(p_rows) LOOP
+        BEGIN
+            v_student_id_cleaned := NULLIF(TRIM(COALESCE(v_row->>'student_id', '')), '');
+            v_prefix := NULLIF(TRIM(COALESCE(v_row->>'prefix', '')), '');
+            v_first_name := TRIM(COALESCE(v_row->>'first_name', ''));
+            v_last_name := TRIM(COALESCE(v_row->>'last_name', ''));
+            v_level := TRIM(COALESCE(v_row->>'level', ''));
+            v_input_club_name := TRIM(COALESCE(v_row->>'club_name', ''));
+
+            -- ตรวจสอบความครบถ้วนขั้นต่ำ
+            IF v_first_name = '' OR v_last_name = '' OR v_input_club_name = '' OR v_level = '' THEN
+                v_failed := v_failed || jsonb_build_object('row', v_row, 'reason', 'ข้อมูลไม่ครบ (ต้องมี first_name, last_name, level, club_name)');
+                CONTINUE;
+            END IF;
+
+            -- ค้นหาชุมนุมตามชื่อ (case-insensitive, trim) พร้อม Row Lock เพื่อป้องกัน Race
+            SELECT id, name, capacity, enrolled_count
+            INTO v_club_id, v_club_name, v_capacity, v_enrolled
+            FROM clubs
+            WHERE LOWER(TRIM(name)) = LOWER(v_input_club_name)
+            LIMIT 1
+            FOR UPDATE;
+
+            IF v_club_id IS NULL THEN
+                v_failed := v_failed || jsonb_build_object('row', v_row, 'reason', 'ไม่พบชุมนุมชื่อ "' || v_input_club_name || '" ในระบบ');
+                CONTINUE;
+            END IF;
+
+            -- เคารพโควตาที่นั่ง (ถ้าเต็ม → skip + รายงาน)
+            IF v_enrolled >= v_capacity THEN
+                v_skipped := v_skipped || jsonb_build_object('row', v_row, 'reason', 'ชุมนุม "' || v_club_name || '" เต็มโควตา (' || v_enrolled || '/' || v_capacity || ')');
+                CONTINUE;
+            END IF;
+
+            -- ป้องกันลงทะเบียนซ้ำด้วยรหัสนักเรียน
+            IF v_student_id_cleaned IS NOT NULL THEN
+                IF EXISTS (SELECT 1 FROM registrations WHERE student_id = v_student_id_cleaned) THEN
+                    v_skipped := v_skipped || jsonb_build_object('row', v_row, 'reason', 'รหัสนักเรียน ' || v_student_id_cleaned || ' ลงทะเบียนชุมนุมไปแล้ว');
+                    CONTINUE;
+                END IF;
+            END IF;
+
+            -- ป้องกันลงทะเบียนซ้ำด้วยชื่อ-นามสกุล (UNIQUE constraint ของตาราง registrations)
+            IF EXISTS (
+                SELECT 1 FROM registrations
+                WHERE TRIM(first_name) = v_first_name
+                  AND TRIM(last_name) = v_last_name
+            ) THEN
+                v_skipped := v_skipped || jsonb_build_object('row', v_row, 'reason', 'นักเรียน ' || v_first_name || ' ' || v_last_name || ' ลงทะเบียนชุมนุมไปแล้ว');
+                CONTINUE;
+            END IF;
+
+            -- กำหนดสถานะ: มีในตาราง students = verified, ไม่มี = pending (ครูยืนยันภายหลัง)
+            IF v_student_id_cleaned IS NOT NULL THEN
+                SELECT EXISTS (SELECT 1 FROM students WHERE student_id = v_student_id_cleaned) INTO v_student_exists;
+            ELSE
+                v_student_exists := FALSE;
+            END IF;
+            v_status := CASE WHEN v_student_exists THEN 'verified' ELSE 'pending' END;
+
+            -- Insert ทะเบียนและเพิ่ม enrolled_count
+            INSERT INTO registrations (club_id, student_id, prefix, first_name, last_name, level, registration_status)
+            VALUES (v_club_id, v_student_id_cleaned, v_prefix, v_first_name, v_last_name, v_level, v_status);
+
+            UPDATE clubs SET enrolled_count = enrolled_count + 1 WHERE id = v_club_id;
+
+            v_inserted_count := v_inserted_count + 1;
+
+        EXCEPTION WHEN OTHERS THEN
+            v_failed := v_failed || jsonb_build_object('row', v_row, 'reason', SQLERRM);
+        END;
+    END LOOP;
+
+    -- บันทึก Audit Log สรุปผลการนำเข้าครั้งนี้
+    INSERT INTO audit_logs (action, ip_address, user_agent, details)
+    VALUES (
+        'BULK_REGISTRATION_IMPORT',
+        COALESCE(p_ip_address, 'Unknown IP'),
+        COALESCE(p_user_agent, 'Unknown Device'),
+        'ผู้ดูแลระบบนำเข้ารายชื่อลงทะเบียนชุมนุมแบบ Bulk: สำเร็จ ' || v_inserted_count
+            || ' รายการ, ข้าม ' || jsonb_array_length(v_skipped)
+            || ' รายการ, ผิดพลาด ' || jsonb_array_length(v_failed) || ' รายการ'
+    );
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'inserted', v_inserted_count,
+        'skipped', v_skipped,
+        'failed', v_failed
+    );
+END;
+$$;
+
+
+-- =====================================================================
 -- 🌱 SEED DATA: ใส่ข้อมูลตัวอย่างสำหรับพร้อมใช้งานในทันที
 -- =====================================================================
 
