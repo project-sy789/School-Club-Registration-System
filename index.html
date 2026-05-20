@@ -7,7 +7,7 @@
     <meta name="description" content="ระบบสมัครเรียนและลงทะเบียนชุมนุมสำหรับนักเรียนระดับมัธยมศึกษาตอนต้นและตอนปลาย รองรับผู้เข้าใช้งานหนาแน่นอย่างรวดเร็วและปลอดภัย พร้อมระบบสำรองสิทธิ์สำหรับนักเรียนใหม่">
     
     <!-- 🎨 CSS Stylesheets & Icons -->
-    <link rel="stylesheet" href="style.css?v=1.1.3">
+    <link rel="stylesheet" href="style.css?v=1.1.4">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
     <!-- 🚀 External Libraries (Supabase and Confetti) via CDN -->
@@ -739,25 +739,13 @@
 
                 <div class="input-group">
                     <label>ระดับชั้นเรียนที่สมัครได้</label>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px;" id="club-form-grades-container">
-                        <label style="display:flex; align-items:center; gap:8px; text-transform:none; font-size:0.9rem; color:var(--text-secondary);">
-                            <input type="checkbox" value="ม.1" checked> ม.1
-                        </label>
-                        <label style="display:flex; align-items:center; gap:8px; text-transform:none; font-size:0.9rem; color:var(--text-secondary);">
-                            <input type="checkbox" value="ม.2" checked> ม.2
-                        </label>
-                        <label style="display:flex; align-items:center; gap:8px; text-transform:none; font-size:0.9rem; color:var(--text-secondary);">
-                            <input type="checkbox" value="ม.3" checked> ม.3
-                        </label>
-                        <label style="display:flex; align-items:center; gap:8px; text-transform:none; font-size:0.9rem; color:var(--text-secondary);">
-                            <input type="checkbox" value="ม.4" checked> ม.4
-                        </label>
-                        <label style="display:flex; align-items:center; gap:8px; text-transform:none; font-size:0.9rem; color:var(--text-secondary);">
-                            <input type="checkbox" value="ม.5" checked> ม.5
-                        </label>
-                        <label style="display:flex; align-items:center; gap:8px; text-transform:none; font-size:0.9rem; color:var(--text-secondary);">
-                            <input type="checkbox" value="ม.6" checked> ม.6
-                        </label>
+                    <div class="grade-checkbox-grid" id="club-form-grades-container">
+                        <label class="grade-check"><input type="checkbox" value="ม.1" checked> ม.1</label>
+                        <label class="grade-check"><input type="checkbox" value="ม.2" checked> ม.2</label>
+                        <label class="grade-check"><input type="checkbox" value="ม.3" checked> ม.3</label>
+                        <label class="grade-check"><input type="checkbox" value="ม.4" checked> ม.4</label>
+                        <label class="grade-check"><input type="checkbox" value="ม.5" checked> ม.5</label>
+                        <label class="grade-check"><input type="checkbox" value="ม.6" checked> ม.6</label>
                     </div>
                 </div>
 

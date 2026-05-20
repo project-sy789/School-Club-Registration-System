@@ -446,6 +446,44 @@ nav {
     letter-spacing: 0.5px;
 }
 
+/* Grade checkbox grid — overrides .input-group defaults */
+.grade-checkbox-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.grade-check {
+    display: flex !important;
+    align-items: center;
+    gap: 8px;
+    text-transform: none !important;
+    font-size: 0.9rem !important;
+    font-weight: 500 !important;
+    letter-spacing: 0 !important;
+    color: var(--text-secondary) !important;
+    cursor: pointer;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid rgba(16, 185, 129, 0.1);
+    background: rgba(7, 23, 15, 0.4);
+    transition: all 0.15s ease;
+}
+
+.grade-check:hover {
+    background: rgba(16, 185, 129, 0.08);
+    border-color: rgba(16, 185, 129, 0.25);
+}
+
+.grade-check input[type="checkbox"] {
+    width: auto !important;
+    padding: 0 !important;
+    margin: 0;
+    accent-color: var(--accent-mint);
+    cursor: pointer;
+}
+
 .input-group input, 
 .input-group select {
     width: 100%;
