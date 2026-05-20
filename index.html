@@ -100,27 +100,20 @@
                     <label for="search-input">ค้นหาชุมนุม</label>
                     <input type="text" id="search-input" placeholder="พิมพ์ชื่อชุมนุม หรือ ชื่อครู..." oninput="filterClubs()">
                 </div>
-                
-                        </button>
-                    </div>
-                    <button class="btn-secondary" onclick="openNewStudentPreRegister()" style="margin-top: 8px; font-size: 0.8rem; padding: 6px; border: 1px dashed var(--accent-mint); color: var(--accent-mint); background: rgba(52, 211, 153, 0.05); width: 100%; justify-content: center; border-radius: 6px; transition: all 0.2s; cursor: pointer;">
-                        <i class="fa-solid fa-user-plus"></i> นักเรียนใหม่? คลิกเพื่อกรอกประวัติเตรียมจอง
-                    </button>
-                </div>
 
                 <div class="input-group">
-                    <label for="filter-grade">ระดับชั้นของคุณ</label>
+                    <label for="filter-grade">กรองระดับชั้น</label>
                     <select id="filter-grade" onchange="filterClubs()">
                         <option value="all">แสดงทุกระดับชั้น</option>
-                        <option value="ม.1">มัธยมศึกษาปีที่ 1 (ม.1)</option>
-                        <option value="ม.2">มัธยมศึกษาปีที่ 2 (ม.2)</option>
-                        <option value="ม.3">มัธยมศึกษาปีที่ 3 (ม.3)</option>
-                        <option value="ม.4">มัธยมศึกษาปีที่ 4 (ม.4)</option>
-                        <option value="ม.5">มัธยมศึกษาปีที่ 5 (ม.5)</option>
-                        <option value="ม.6">มัธยมศึกษาปีที่ 6 (ม.6)</option>
+                        <option value="ม.1">ม.1</option>
+                        <option value="ม.2">ม.2</option>
+                        <option value="ม.3">ม.3</option>
+                        <option value="ม.4">ม.4</option>
+                        <option value="ม.5">ม.5</option>
+                        <option value="ม.6">ม.6</option>
                     </select>
                 </div>
-                
+
                 <div class="input-group">
                     <label for="filter-availability">สถานะที่นั่ง</label>
                     <select id="filter-availability" onchange="filterClubs()">
@@ -128,11 +121,11 @@
                         <option value="available">เฉพาะที่ยังไม่เต็ม</option>
                     </select>
                 </div>
-                
+
                 <div class="toggle-group" onclick="toggleFilterMyGrades()">
                     <input type="checkbox" id="my-grades-only" style="display:none;">
                     <div class="toggle-switch"></div>
-                    <span style="font-size: 0.9rem; color: var(--text-secondary);">คัดกรองเฉพาะระดับชั้นที่ฉันสมัครได้</span>
+                    <span style="font-size: 0.9rem; color: var(--text-secondary);">เฉพาะชั้นที่สมัครได้</span>
                 </div>
             </div>
         </section>
