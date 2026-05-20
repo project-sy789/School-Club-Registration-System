@@ -139,6 +139,34 @@ function updateSystemUI() {
     document.getElementById("banner-school-title").innerText = `ยินดีต้อนรับสู่ระบบลงทะเบียนชุมนุม ${config.school_name || ""}`;
     document.getElementById("banner-semester-badge").innerText = `ปีการศึกษา ${config.semester || "1/2569"}`;
     document.getElementById("ticket-school-name").innerText = config.school_name || "";
+
+    // 🖼️ อัปเดตโลโก้โรงเรียน (Header Logo)
+    const logoIcon = document.querySelector(".logo-icon");
+    if (logoIcon) {
+        if (config.logo_base64) {
+            logoIcon.innerHTML = `<img src="${config.logo_base64}" alt="${config.school_name}">`;
+        } else {
+            logoIcon.innerHTML = `<i class="fa-solid fa-graduation-cap"></i>`;
+        }
+    }
+
+    // 🎨 อัปเดต Favicon ของเว็บบราวเซอร์
+    updateFavicon(config.logo_base64);
+}
+
+function updateFavicon(base64Data) {
+    let link = document.querySelector("link[rel~='icon']");
+    if (!link) {
+        link = document.createElement('link');
+        link.rel = 'icon';
+        document.getElementsByTagName('head')[0].appendChild(link);
+    }
+    if (base64Data) {
+        link.href = base64Data;
+    } else {
+        // คืนค่า favicon เริ่มต้น (รูปหมวกรับปริญญาสีเขียวมิ้นต์ SVG)
+        link.href = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 640 512'%3E%3Cpath fill='%2334d399' d='M624 138.4l-296-104c-12-4.2-25.1-4.2-37.1 0l-296 104c-20 7-30.7 29.2-23.7 49.2L68 471.1C72 482.9 83 491 95.4 491H544.6c12.4 0 23.4-8.1 27.4-19.9l95.7-283.5c7-20-3.7-42.2-23.7-49.2zM320 224c-35.3 0-64-28.7-64-64s28.7-64 64-64 64 28.7 64 64-28.7 64-64 64z'/%3E%3C/svg%3E";
+    }
 }
 
 // ฟังก์ชันนับถอยหลังและอัปเดตสถานะของระบบเปิด-ปิดรับสมัคร
@@ -1735,6 +1763,18 @@ function renderAdminSettings() {
     document.getElementById("admin-settings-semester").value = config.semester || "";
     document.getElementById("admin-settings-admin-password").value = config.admin_password || "";
 
+    // 🖼️ แสดงพรีวิวรูปภาพโลโก้เดิม
+    const previewBox = document.getElementById("settings-logo-preview");
+    if (config.logo_base64) {
+        previewBox.innerHTML = `<img src="${config.logo_base64}" alt="School Logo Preview">`;
+        document.getElementById("btn-remove-logo").style.display = "inline-flex";
+        state.temp_logo_base64 = config.logo_base64;
+    } else {
+        previewBox.innerHTML = `<i class="fa-solid fa-graduation-cap" style="color: var(--accent-mint); font-size: 1.5rem;" id="settings-logo-preview-icon"></i>`;
+        document.getElementById("btn-remove-logo").style.display = "none";
+        state.temp_logo_base64 = null;
+    }
+
     const activeCheckbox = document.getElementById("admin-settings-is-active");
     activeCheckbox.checked = period.is_active;
     document.getElementById("admin-settings-status-label").innerText = period.is_active ? "เปิดระบบรับสมัครจริง" : "ปิดระบบรับสมัคร";
@@ -1780,7 +1820,8 @@ async function saveSystemSettings() {
     const payloadConfig = {
         school_name: schoolName,
         semester,
-        admin_password: adminPassword
+        admin_password: adminPassword,
+        logo_base64: state.temp_logo_base64 || null
     };
 
     const payloadPeriod = {
@@ -1821,8 +1862,46 @@ async function saveSystemSettings() {
         updateSystemUI();
     } catch (e) {
         console.error("Error saving settings:", e);
-        showToast("เกิดข้อผิดพลาดในการเซฟข้อมูลเข้าระบบ", "error");
     }
+}
+
+// 🖼️ จัดการการอัปโหลดโลโก้โรงเรียน (Base64)
+function handleLogoUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    // ตรวจสอบขนาดไฟล์ (ไม่ควรเกิน 2MB เพื่อป้องกันไม่ให้หนักฐานข้อมูลเกินไป)
+    if (file.size > 2 * 1024 * 1024) {
+        showToast("ขนาดรูปภาพต้องไม่เกิน 2MB เพื่อความเสถียรและรวดเร็วในการโหลดระบบ", "warning");
+        event.target.value = "";
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const base64Data = e.target.result;
+        state.temp_logo_base64 = base64Data; // เก็บรูปไว้ชั่วคราว
+        
+        // แสดงตัวอย่างรูปภาพในหน้าต่างตั้งค่า
+        const previewBox = document.getElementById("settings-logo-preview");
+        previewBox.innerHTML = `<img src="${base64Data}" alt="School Logo Preview">`;
+        
+        // แสดงปุ่มลบโลโก้
+        document.getElementById("btn-remove-logo").style.display = "inline-flex";
+    };
+    reader.readAsDataURL(file);
+}
+
+function removeSchoolLogo() {
+    state.temp_logo_base64 = null;
+    
+    // รีเซ็ตหน้าตาตัวอย่างในหน้าตั้งค่า
+    const previewBox = document.getElementById("settings-logo-preview");
+    previewBox.innerHTML = `<i class="fa-solid fa-graduation-cap" style="color: var(--accent-mint); font-size: 1.5rem;" id="settings-logo-preview-icon"></i>`;
+    
+    // ซ่อนปุ่มลบโลโก้ และล้างค่าใน input
+    document.getElementById("btn-remove-logo").style.display = "none";
+    document.getElementById("admin-settings-logo-file").value = "";
 }
 
 // =====================================================================

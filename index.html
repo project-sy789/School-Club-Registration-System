@@ -450,6 +450,25 @@
                             </div>
 
                             <div class="input-group">
+                                <label>โลโก้และไอคอนโรงเรียน (Favicon & App Icon)</label>
+                                <div style="display: flex; gap: 12px; align-items: center; margin-top: 5px;">
+                                    <div class="logo-preview-box" id="settings-logo-preview" style="width: 50px; height: 50px; border-radius: var(--border-radius-sm); border: 2px dashed var(--accent-mint); display: flex; align-items: center; justify-content: center; overflow: hidden; background: rgba(255,255,255,0.05); flex-shrink: 0;">
+                                        <i class="fa-solid fa-graduation-cap" style="color: var(--accent-mint); font-size: 1.5rem;" id="settings-logo-preview-icon"></i>
+                                    </div>
+                                    <div style="flex-grow: 1;">
+                                        <input type="file" id="admin-settings-logo-file" accept="image/*" style="display: none;" onchange="handleLogoUpload(event)">
+                                        <button type="button" class="btn-secondary" style="padding: 6px 12px; font-size: 0.85rem;" onclick="document.getElementById('admin-settings-logo-file').click()">
+                                            <i class="fa-solid fa-cloud-arrow-up"></i> เลือกไฟล์รูปภาพ...
+                                        </button>
+                                        <button type="button" class="btn-danger-outline" id="btn-remove-logo" style="padding: 6px 12px; font-size: 0.85rem; display: none; margin-left: 8px;" onclick="removeSchoolLogo()">
+                                            <i class="fa-solid fa-trash-can"></i> ล้างโลโก้
+                                        </button>
+                                        <p style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 4px;">รองรับ PNG, JPG, SVG (แนะนำรูปภาพสี่เหลี่ยมจัตุรัส)</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="input-group">
                                 <label for="admin-settings-semester">ภาคเรียน / ปีการศึกษา</label>
                                 <input type="text" id="admin-settings-semester" placeholder="เช่น 1/2569">
                             </div>

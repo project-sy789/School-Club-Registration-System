@@ -22,7 +22,8 @@ INSERT INTO settings (key, value) VALUES
 ('school_config', '{
     "school_name": "โรงเรียนมัธยมศึกษารวมวิทยายน",
     "semester": "1/2569",
-    "admin_password": "admin"
+    "admin_password": "admin",
+    "logo_base64": null
 }'::jsonb),
 ('registration_period', '{
     "is_active": true,
