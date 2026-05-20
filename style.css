@@ -195,11 +195,12 @@ nav {
 }
 
 .hero-banner {
-    padding: 3rem;
+    padding: 2.5rem 3rem;
     border-radius: var(--border-radius-lg);
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    gap: 2.5rem;
+    align-items: center;
     position: relative;
     overflow: hidden;
 }
@@ -215,10 +216,76 @@ nav {
     pointer-events: none;
 }
 
+.hero-left {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    position: relative;
+    z-index: 2;
+}
+
 .hero-content {
     max-width: 800px;
     position: relative;
     z-index: 2;
+}
+
+/* Identity panel on the right side of hero */
+.hero-identity-panel {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.identity-card {
+    background: rgba(7, 23, 15, 0.55);
+    border: 1px solid rgba(52, 211, 153, 0.25);
+    border-radius: 14px;
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    backdrop-filter: blur(12px);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+}
+
+.identity-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--accent-mint);
+    font-size: 0.95rem;
+    font-weight: 700;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(52, 211, 153, 0.15);
+}
+
+.identity-divider {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+}
+
+.identity-divider::before,
+.identity-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: rgba(52, 211, 153, 0.15);
+}
+
+/* Responsive: stack on small screens */
+@media (max-width: 900px) {
+    .hero-banner {
+        grid-template-columns: 1fr;
+    }
+    .hero-identity-panel {
+        order: -1;
+    }
 }
 
 .semester-badge {
@@ -328,7 +395,7 @@ nav {
 .search-bar-container {
     padding: 1.5rem;
     display: grid;
-    grid-template-columns: 2fr 1fr 1fr 1fr;
+    grid-template-columns: 2fr 1fr 1fr;
     gap: 1.25rem;
     align-items: start;
 }
