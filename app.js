@@ -3,6 +3,7 @@
    ===================================================================== */
 
 let supabaseClient = null;
+let activeToastTimeout = null; // บันทึกไอดีสำหรับเคลียร์เวลาแสดง Toast ป้องกันการแสดงทับแล้วดับเร็ว
 
 // 📊 Application State
 let state = {
@@ -1998,10 +1999,20 @@ function showToast(message, type = "info") {
         icon.className = "fa-solid fa-circle-info";
     }
 
-    // ซ่อนแบนเนอร์หลังผ่านไป 3.5 วินาที
-    setTimeout(() => {
+    // เคลียร์ Timeout อันเก่าก่อนเพื่อรีสตาร์ตเวลาของข้อความใหม่ (ป้องกันการแชร์เวลาแล้วหายไปก่อนกำหนด)
+    if (activeToastTimeout) {
+        clearTimeout(activeToastTimeout);
+    }
+
+    // คำนวณเวลาแสดงผลตามความยาวข้อความ (ความยาวข้อความ * 85ms ขั้นต่ำ 4.5 วินาที สูงสุด 8 วินาที)
+    // เพื่อให้ผู้ใช้มีเวลาเพียงพอในการอ่านข้อความยาว ๆ เช่น คำต้อนรับชื่อ-นามสกุล
+    const duration = Math.max(4500, Math.min(8000, message.length * 85));
+
+    // ซ่อนแบนเนอร์หลังหมดเวลา
+    activeToastTimeout = setTimeout(() => {
         toast.classList.remove("active");
-    }, 3500);
+        activeToastTimeout = null;
+    }, duration);
 }
 
 // =====================================================================
