@@ -7,7 +7,7 @@
     <meta name="description" content="ระบบสมัครเรียนและลงทะเบียนชุมนุมสำหรับนักเรียนระดับมัธยมศึกษาตอนต้นและตอนปลาย รองรับผู้เข้าใช้งานหนาแน่นอย่างรวดเร็วและปลอดภัย พร้อมระบบสำรองสิทธิ์สำหรับนักเรียนใหม่">
     
     <!-- 🎨 CSS Stylesheets & Icons -->
-    <link rel="stylesheet" href="style.css?v=1.1.1">
+    <link rel="stylesheet" href="style.css?v=1.1.2">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
     <!-- 🚀 External Libraries (Supabase and Confetti) via CDN -->
@@ -528,7 +528,7 @@
                                 <i class="fa-solid fa-magnifying-glass" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-secondary); font-size: 0.85rem;"></i>
                             </div>
                             <select id="admin-log-action-filter" onchange="filterAdminLogs()"
-                                    style="background: #0d281a; border: var(--border-glass); color: var(--text-primary); padding: 10px 12px; border-radius: 6px; font-size: 0.9rem; width: 220px; height: 42px; cursor: pointer; outline: none;">
+                                    style="background: #0d281a; border: var(--border-glass); color: var(--text-primary); padding: 10px 12px; border-radius: 6px; font-size: 0.9rem; min-width: 180px; height: 42px; cursor: pointer; outline: none;">
                                 <option value="" style="background: #0d281a; color: var(--text-primary);">-- กิจกรรมทั้งหมด --</option>
                                 <option value="REGISTER_SUCCESS" style="background: #0d281a; color: var(--text-primary);">ลงทะเบียนสำเร็จ (เดิม)</option>
                                 <option value="REGISTER_PENDING" style="background: #0d281a; color: var(--text-primary);">ลงทะเบียนสำรอง (ใหม่)</option>
@@ -545,12 +545,12 @@
                             <table class="data-table">
                                 <thead>
                                     <tr>
-                                        <th style="width: 150px;">วัน-เวลา</th>
-                                        <th style="width: 140px;">กิจกรรม</th>
-                                        <th style="width: 180px;">นักเรียน</th>
-                                        <th style="width: 150px;">ชุมนุม</th>
-                                        <th style="width: 120px;">IP Address</th>
-                                        <th>รายละเอียดความปลอดภัย / อุปกรณ์</th>
+                                        <th>วัน-เวลา</th>
+                                        <th>กิจกรรม</th>
+                                        <th>นักเรียน</th>
+                                        <th>ชุมนุม</th>
+                                        <th>IP</th>
+                                        <th>อุปกรณ์/รายละเอียด</th>
                                     </tr>
                                 </thead>
                                 <tbody id="admin-logs-tbody">
@@ -818,7 +818,7 @@
 
     <!-- 💻 6. Javascript Logic Engine -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script src="config.js?v=1.1.0"></script>
-    <script src="app.js?v=1.1.0"></script>
+    <script src="config.js?v=1.1.2"></script>
+    <script src="app.js?v=1.1.2"></script>
 </body>
 </html>
