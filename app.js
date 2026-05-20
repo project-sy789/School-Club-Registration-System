@@ -465,9 +465,8 @@ async function quickVerifyStudent() {
             // รีเรนเดอร์บอร์ดแสดงรายชื่อชุมนุมใหม่
             renderClubsGrid();
         } else {
-            showToast("ไม่พบรหัสประจำตัว กรุณากรอกประวัติล่วงหน้าเพื่อเตรียมพร้อมลงทะเบียนชุมนุม", "warning");
+            showToast("ไม่พบรหัสประจำตัว กรุณาตรวจสอบอีกครั้ง หรือคลิกปุ่มนักเรียนใหม่ด้านล่างเพื่อเตรียมความพร้อม", "warning");
             state.currentStudentInfo = null;
-            state.pendingNewStudentId = idInput;
             updateQuickVerifyUI();
         }
     } catch (e) {
@@ -505,13 +504,13 @@ function updateQuickVerifyUI() {
                 </button>
             </div>
         `;
-    } else if (state.pendingNewStudentId) {
+    } else if (state.isNewStudentPreRegistering) {
         wrapper.innerHTML = `
-            <label style="color: #fca5a5; font-size: 0.85rem; font-weight: 600; display: flex; align-items: center; gap: 6px;">
-                <i class="fa-solid fa-triangle-exclamation"></i> ไม่พบรหัสนักเรียน: กรุณากรอกประวัติล่วงหน้า
+            <label style="color: var(--accent-mint); font-size: 0.85rem; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                <i class="fa-solid fa-user-plus"></i> เตรียมข้อมูลนักเรียนใหม่
             </label>
-            <div style="background: rgba(7, 23, 15, 0.7); border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; gap: 8px;">
-                <div style="font-size: 0.8rem; color: var(--text-secondary);">รหัส: <b style="color: white;">${state.pendingNewStudentId}</b> (นักเรียนใหม่)</div>
+            <div style="background: rgba(7, 23, 15, 0.7); border: 1px solid rgba(52, 211, 153, 0.4); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; gap: 8px;">
+                <input type="text" id="quick-new-id" placeholder="รหัสอ้างอิงชั่วคราว (เช่น เบอร์โทรศัพท์ หรือบัตรปชช.)" style="background: rgba(7, 23, 15, 0.9); border: var(--border-glass); color: white; padding: 6px; border-radius: 4px; font-size: 0.8rem; width: 100%;">
                 <div style="display: flex; gap: 6px;">
                     <select id="quick-prefix" style="background: rgba(7, 23, 15, 0.9); border: var(--border-glass); color: white; padding: 6px; border-radius: 4px; font-size: 0.8rem; width: 35%;">
                         <option value="">คำนำหน้า</option>
@@ -529,7 +528,7 @@ function updateQuickVerifyUI() {
                     <input type="text" id="quick-lastname" placeholder="นามสกุล" style="background: rgba(7, 23, 15, 0.9); border: var(--border-glass); color: white; padding: 6px; border-radius: 4px; font-size: 0.8rem; flex: 1;">
                 </div>
                 <div style="display: flex; gap: 6px; margin-top: 4px;">
-                    <button class="btn-primary" onclick="saveQuickNewStudent()" style="flex: 1; padding: 6px; font-size: 0.85rem; border-radius: 4px; display: flex; justify-content: center; height: 32px;"><i class="fa-solid fa-save" style="margin-right: 5px;"></i> บันทึกเตรียมพร้อม</button>
+                    <button class="btn-primary" onclick="saveQuickNewStudent()" style="flex: 1; padding: 6px; font-size: 0.85rem; border-radius: 4px; display: flex; justify-content: center; height: 32px;"><i class="fa-solid fa-save" style="margin-right: 5px;"></i> บันทึกข้อมูล</button>
                     <button class="btn-secondary" onclick="cancelQuickNewStudent()" style="padding: 6px 12px; font-size: 0.85rem; border-radius: 4px; height: 32px;">ยกเลิก</button>
                 </div>
             </div>
@@ -542,39 +541,50 @@ function updateQuickVerifyUI() {
         }
     } else {
         wrapper.innerHTML = `
-            <label for="student-quick-id">ระบุตัวตน (กรอกรหัสเพื่อคัดกรองออโต้)</label>
+            <label for="student-quick-id">ระบุตัวตน (สำหรับนักเรียนที่มีรหัส)</label>
             <div style="display: flex; gap: 6px; width: 100%;">
-                <input type="text" id="student-quick-id" placeholder="รหัส 5 หลัก..." 
+                <input type="text" id="student-quick-id" placeholder="รหัสประจำตัว 5 หลัก..." 
                        onkeyup="handleQuickIdKeyPress(event)"
                        style="background: rgba(7, 23, 15, 0.7); border: var(--border-glass); color: var(--text-primary); padding: 8px 10px; border-radius: 6px; font-size: 0.9rem; flex: 1;">
                 <button class="btn-primary" onclick="quickVerifyStudent()" style="padding: 0 10px; border-radius: 6px; font-size: 0.85rem; height: 38px; display: flex; align-items: center; justify-content: center; background: var(--accent-mint); border: none; color: #07170f; cursor: pointer; transition: all 0.2s ease;">
                     <i class="fa-solid fa-user-check"></i>
                 </button>
             </div>
+            <button class="btn-secondary" onclick="openNewStudentPreRegister()" style="margin-top: 8px; font-size: 0.8rem; padding: 6px; border: 1px dashed var(--accent-mint); color: var(--accent-mint); background: rgba(52, 211, 153, 0.05); width: 100%; justify-content: center; border-radius: 6px; transition: all 0.2s; cursor: pointer;">
+                <i class="fa-solid fa-user-plus"></i> นักเรียนใหม่? คลิกเพื่อกรอกประวัติเตรียมจอง
+            </button>
         `;
     }
 }
 
+// 👩‍🎓 เปิดโหมดเตรียมนักเรียนใหม่
+function openNewStudentPreRegister() {
+    state.isNewStudentPreRegistering = true;
+    state.currentStudentInfo = null;
+    updateQuickVerifyUI();
+}
+
 // 💾 บันทึกข้อมูลนักเรียนใหม่ล่วงหน้าลงใน State (เพื่อความพร้อม)
 function saveQuickNewStudent() {
+    const newId = document.getElementById("quick-new-id").value.trim();
     const prefix = document.getElementById("quick-prefix").value;
     const level = document.getElementById("quick-level").value;
     const firstName = document.getElementById("quick-firstname").value.trim();
     const lastName = document.getElementById("quick-lastname").value.trim();
 
-    if (!prefix || !level || !firstName || !lastName || level === "custom") {
-        showToast("กรุณากรอกข้อมูล คำนำหน้า ชื่อ นามสกุล และระดับชั้นให้ครบถ้วน", "warning");
+    if (!newId || !prefix || !level || !firstName || !lastName || level === "custom") {
+        showToast("กรุณากรอกข้อมูล รหัสอ้างอิง คำนำหน้า ชื่อ นามสกุล และระดับชั้นให้ครบถ้วน", "warning");
         return;
     }
 
     state.currentStudentInfo = {
-        student_id: state.pendingNewStudentId,
+        student_id: newId,
         prefix: prefix,
         first_name: firstName,
         last_name: lastName,
         level: level
     };
-    state.pendingNewStudentId = null;
+    state.isNewStudentPreRegistering = false;
 
     const levelPrefix = level.split('/')[0];
     document.getElementById("filter-grade").value = levelPrefix;
@@ -591,7 +601,7 @@ function saveQuickNewStudent() {
 }
 
 function cancelQuickNewStudent() {
-    state.pendingNewStudentId = null;
+    state.isNewStudentPreRegistering = false;
     updateQuickVerifyUI();
 }
 
