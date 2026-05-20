@@ -510,24 +510,25 @@ function updateQuickVerifyUI() {
                 <i class="fa-solid fa-user-plus"></i> เตรียมข้อมูลนักเรียนใหม่
             </label>
             <div style="background: rgba(7, 23, 15, 0.7); border: 1px solid rgba(52, 211, 153, 0.4); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; gap: 8px;">
-                <input type="text" id="quick-new-id" placeholder="รหัสอ้างอิงชั่วคราว (เช่น เบอร์โทรศัพท์ หรือบัตรปชช.)" style="background: rgba(7, 23, 15, 0.9); border: var(--border-glass); color: white; padding: 6px; border-radius: 4px; font-size: 0.8rem; width: 100%;">
                 <div style="display: flex; gap: 6px;">
-                    <select id="quick-prefix" style="background: rgba(7, 23, 15, 0.9); border: var(--border-glass); color: white; padding: 6px; border-radius: 4px; font-size: 0.8rem; width: 35%;">
+                    <input type="text" id="quick-new-id" placeholder="เบอร์โทรศัพท์ 10 หลัก หรือ เลขบัตรปชช. 13 หลัก" style="background: rgba(7, 23, 15, 0.9); border: var(--border-glass); color: white; padding: 6px; border-radius: 4px; font-size: 0.8rem; flex: 1;">
+                    <select id="quick-prefix" style="background: rgba(7, 23, 15, 0.9); border: var(--border-glass); color: white; padding: 6px; border-radius: 4px; font-size: 0.8rem; width: 38%;">
                         <option value="">คำนำหน้า</option>
                         <option value="เด็กชาย">เด็กชาย</option>
                         <option value="เด็กหญิง">เด็กหญิง</option>
                         <option value="นาย">นาย</option>
                         <option value="นางสาว">นางสาว</option>
                     </select>
-                    <select id="quick-level" style="background: rgba(7, 23, 15, 0.9); border: var(--border-glass); color: white; padding: 6px; border-radius: 4px; font-size: 0.8rem; flex: 1;">
-                        <option value="">ระดับชั้น (เช่น ม.4/1)</option>
-                    </select>
                 </div>
                 <div style="display: flex; gap: 6px;">
                     <input type="text" id="quick-firstname" placeholder="ชื่อจริง" style="background: rgba(7, 23, 15, 0.9); border: var(--border-glass); color: white; padding: 6px; border-radius: 4px; font-size: 0.8rem; flex: 1;">
                     <input type="text" id="quick-lastname" placeholder="นามสกุล" style="background: rgba(7, 23, 15, 0.9); border: var(--border-glass); color: white; padding: 6px; border-radius: 4px; font-size: 0.8rem; flex: 1;">
                 </div>
-                <div style="display: flex; gap: 6px; margin-top: 4px;">
+                <select id="quick-level" style="background: rgba(7, 23, 15, 0.9); border: var(--border-glass); color: white; padding: 6px; border-radius: 4px; font-size: 0.8rem; width: 100%;">
+                    <option value="">เลือกระดับชั้น/ห้อง...</option>
+                </select>
+                <input type="text" id="quick-level-custom" placeholder="ระบุชั้น/ห้องเรียนเอง เช่น ม.4/5" style="display: none; background: rgba(7, 23, 15, 0.9); border: 1px solid var(--accent-mint); color: white; padding: 6px; border-radius: 4px; font-size: 0.8rem; width: 100%;">
+                <div style="display: flex; gap: 6px; margin-top: 2px;">
                     <button class="btn-primary" onclick="saveQuickNewStudent()" style="flex: 1; padding: 6px; font-size: 0.85rem; border-radius: 4px; display: flex; justify-content: center; height: 32px;"><i class="fa-solid fa-save" style="margin-right: 5px;"></i> บันทึกข้อมูล</button>
                     <button class="btn-secondary" onclick="cancelQuickNewStudent()" style="padding: 6px 12px; font-size: 0.85rem; border-radius: 4px; height: 32px;">ยกเลิก</button>
                 </div>
@@ -539,6 +540,17 @@ function updateQuickVerifyUI() {
             document.getElementById("quick-level").innerHTML = modalSelect.innerHTML;
             document.getElementById("quick-level").value = "";
         }
+        // เปิด/ปิดช่องระบุเองเมื่อเลือก 'อื่นๆ'
+        document.getElementById("quick-level").addEventListener("change", function() {
+            const customInput = document.getElementById("quick-level-custom");
+            if (this.value === "custom") {
+                customInput.style.display = "block";
+                customInput.focus();
+            } else {
+                customInput.style.display = "none";
+                customInput.value = "";
+            }
+        });
     } else {
         wrapper.innerHTML = `
             <label for="student-quick-id">ระบุตัวตน (สำหรับนักเรียนที่มีรหัส)</label>
@@ -568,12 +580,14 @@ function openNewStudentPreRegister() {
 function saveQuickNewStudent() {
     const newId = document.getElementById("quick-new-id").value.trim();
     const prefix = document.getElementById("quick-prefix").value;
-    const level = document.getElementById("quick-level").value;
+    const levelSelect = document.getElementById("quick-level").value;
+    const levelCustom = (document.getElementById("quick-level-custom")?.value || "").trim();
+    const level = (levelSelect === "custom") ? levelCustom : levelSelect;
     const firstName = document.getElementById("quick-firstname").value.trim();
     const lastName = document.getElementById("quick-lastname").value.trim();
 
-    if (!newId || !prefix || !level || !firstName || !lastName || level === "custom") {
-        showToast("กรุณากรอกข้อมูล รหัสอ้างอิง คำนำหน้า ชื่อ นามสกุล และระดับชั้นให้ครบถ้วน", "warning");
+    if (!newId || !prefix || !level || !firstName || !lastName) {
+        showToast("กรุณากรอกข้อมูลให้ครบ: รหัสอ้างอิง, คำนำหน้า, ชื่อ, นามสกุล และระดับชั้น", "warning");
         return;
     }
 
