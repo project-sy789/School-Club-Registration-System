@@ -1097,47 +1097,62 @@ async function loadStudentsList() {
     }
 }
 
-// 🟢 อัปโหลดรายชื่อเด็ก bulk import ผ่านหน้าบ้าน CSV
+// 🟢 อัปโหลดรายชื่อเด็ก bulk import ผ่านหน้าบ้าน CSV/Excel
 async function handleStudentCSVImport(event) {
     if (!supabaseClient) return;
     const file = event.target.files[0];
     if (!file) return;
 
+    const fileExtension = file.name.split('.').pop().toLowerCase();
     showToast("กำลังเริ่มวิเคราะห์ไฟล์รายชื่อนักเรียน...", "info");
 
     const reader = new FileReader();
     reader.onload = async function(e) {
-        const content = e.target.result;
-        const lines = content.split(/\r?\n/);
-        const batch = [];
-
-        // สมมติโครงสร้างหัวตาราง CSV: student_id, first_name, last_name, level
-        // วนลูปอ่านข้อมูลข้ามแถวแรก (Headers)
-        for (let i = 1; i < lines.length; i++) {
-            const line = lines[i].trim();
-            if (!line) continue;
-
-            // จัดการ Split comma โดยหลบเว้นวรรค
-            const cols = line.split(",").map(val => val.trim().replace(/^["']|["']$/g, ""));
-            
-            if (cols.length >= 4) {
-                batch.push({
-                    student_id: cols[0],
-                    first_name: cols[1],
-                    last_name: cols[2],
-                    level: cols[3]
-                });
-            }
-        }
-
-        if (batch.length === 0) {
-            showToast("โครงสร้างไฟล์ CSV ไม่ถูกต้อง หรือไม่มีแถวข้อมูลที่สามารถนำเข้าได้", "error");
-            return;
-        }
-
-        showToast(`กำลังส่งข้อมูลจำนวน ${batch.length} คน เข้าสู่ระบบฐานข้อมูล...`, "info");
-
         try {
+            let rows = [];
+            if (fileExtension === 'xlsx' || fileExtension === 'xls' || fileExtension === 'csv') {
+                if (typeof XLSX === 'undefined') {
+                    showToast("ไม่พบไลบรารีสำหรับประมวลผลไฟล์ Excel/CSV (SheetJS)", "error");
+                    return;
+                }
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const firstSheet = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheet];
+                rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+            } else {
+                showToast("ไม่รองรับรูปแบบไฟล์นี้ กรุณาใช้ไฟล์ .csv หรือ .xlsx", "error");
+                return;
+            }
+
+            const batch = [];
+            // วนลูปอ่านข้อมูลข้ามแถวแรก (Headers)
+            for (let i = 1; i < rows.length; i++) {
+                const row = rows[i];
+                if (!row || row.length === 0) continue;
+                
+                const student_id = row[0] ? String(row[0]).trim() : '';
+                const first_name = row[1] ? String(row[1]).trim() : '';
+                const last_name = row[2] ? String(row[2]).trim() : '';
+                const level = row[3] ? String(row[3]).trim() : '';
+
+                if (student_id && first_name) {
+                    batch.push({
+                        student_id: student_id,
+                        first_name: first_name,
+                        last_name: last_name,
+                        level: level
+                    });
+                }
+            }
+
+            if (batch.length === 0) {
+                showToast("โครงสร้างไฟล์ไม่ถูกต้อง หรือไม่มีแถวข้อมูลที่สามารถนำเข้าได้", "error");
+                return;
+            }
+
+            showToast(`กำลังส่งข้อมูลจำนวน ${batch.length} คน เข้าสู่ระบบฐานข้อมูล...`, "info");
+
             // อัปเดตเข้ารายชื่อ (ใช้ Upsert เพื่อทับรายชื่อเดิมหากเลขซ้ำ)
             const { error } = await supabaseClient
                 .from("students")
@@ -1149,67 +1164,78 @@ async function handleStudentCSVImport(event) {
             loadStudentsList();
         } catch (err) {
             console.error("Error importing bulk data:", err);
-            showToast("เกิดข้อผิดพลาดในการ Bulk อัปเดตรายชื่อเด็กสู่ Supabase", "error");
+            showToast("เกิดข้อผิดพลาดในการ Bulk อัปเดตรายชื่อนักเรียน", "error");
         }
     };
     
-    reader.readAsText(file, "UTF-8");
+    reader.readAsArrayBuffer(file);
 }
 
-// 🟢 อัปโหลดรายชื่อชุมนุม bulk import ผ่านหน้าบ้าน CSV
+// 🟢 อัปโหลดรายชื่อชุมนุม bulk import ผ่านหน้าบ้าน CSV/Excel
 async function handleClubsCSVImport(event) {
     if (!supabaseClient) return;
     const file = event.target.files[0];
     if (!file) return;
 
+    const fileExtension = file.name.split('.').pop().toLowerCase();
     showToast("กำลังเริ่มวิเคราะห์ไฟล์รายชื่อชุมนุม...", "info");
 
     const reader = new FileReader();
     reader.onload = async function(e) {
-        const content = e.target.result;
-        const lines = content.split(/\r?\n/);
-        const batch = [];
-
-        // โครงสร้างหัวตาราง CSV: name, teacher, location, capacity, description, grades
-        // วนลูปอ่านข้อมูลข้ามแถวแรก (Headers)
-        for (let i = 1; i < lines.length; i++) {
-            const line = lines[i].trim();
-            if (!line) continue;
-
-            // จัดการ Split comma โดยหลบเว้นวรรค
-            const cols = line.split(",").map(val => val.trim().replace(/^["']|["']$/g, ""));
-            
-            if (cols.length >= 3) {
-                const name = cols[0];
-                const teacher = cols[1];
-                const location = cols[2];
-                const capacity = parseInt(cols[3]) || 40;
-                const description = cols[4] || "";
-                
-                // แยกชั้นเรียนด้วย ; หรือ / หรือ | (ค่าเริ่มต้นคือทุกชั้นปี)
-                const gradesStr = cols[5] || "ม.1,ม.2,ม.3,ม.4,ม.5,ม.6";
-                const grades = gradesStr.split(/[;|/]/).map(g => g.trim()).filter(Boolean);
-
-                batch.push({
-                    name,
-                    teacher,
-                    location,
-                    capacity,
-                    description,
-                    grades
-                });
-            }
-        }
-
-        if (batch.length === 0) {
-            showToast("โครงสร้างไฟล์ CSV ไม่ถูกต้อง หรือไม่มีแถวข้อมูลที่สามารถนำเข้าได้", "error");
-            return;
-        }
-
-        showToast(`กำลังส่งข้อมูลชุมนุมจำนวน ${batch.length} ชุมนุม เข้าสู่ระบบฐานข้อมูล...`, "info");
-
         try {
-            // แทรกรายชื่อชุมนุมทั้งหมด
+            let rows = [];
+            if (fileExtension === 'xlsx' || fileExtension === 'xls' || fileExtension === 'csv') {
+                if (typeof XLSX === 'undefined') {
+                    showToast("ไม่พบไลบรารีสำหรับประมวลผลไฟล์ Excel/CSV (SheetJS)", "error");
+                    return;
+                }
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const firstSheet = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheet];
+                rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+            } else {
+                showToast("ไม่รองรับรูปแบบไฟล์นี้ กรุณาใช้ไฟล์ .csv หรือ .xlsx", "error");
+                return;
+            }
+
+            const batch = [];
+            // วนลูปอ่านข้อมูลข้ามแถวแรก (Headers)
+            // โครงสร้าง: name, teacher, location, capacity, description, grades
+            for (let i = 1; i < rows.length; i++) {
+                const row = rows[i];
+                if (!row || row.length === 0) continue;
+
+                const name = row[0] ? String(row[0]).trim() : '';
+                const teacher = row[1] ? String(row[1]).trim() : '';
+                const location = row[2] ? String(row[2]).trim() : '';
+                const capacityRaw = row[3];
+                const capacity = parseInt(capacityRaw) || 40;
+                const description = row[4] ? String(row[4]).trim() : '';
+                
+                // แยกชั้นเรียนด้วย ; หรือ / หรือ | หรือ , (ค่าเริ่มต้นคือทุกชั้นปี)
+                const gradesStr = row[5] ? String(row[5]).trim() : "ม.1,ม.2,ม.3,ม.4,ม.5,ม.6";
+                const grades = gradesStr.split(/[;,/|]/).map(g => g.trim()).filter(Boolean);
+
+                if (name) {
+                    batch.push({
+                        name: name,
+                        teacher: teacher,
+                        location: location,
+                        capacity: capacity,
+                        description: description,
+                        grades: grades
+                    });
+                }
+            }
+
+            if (batch.length === 0) {
+                showToast("โครงสร้างไฟล์ไม่ถูกต้อง หรือไม่มีแถวข้อมูลที่สามารถนำเข้าได้", "error");
+                return;
+            }
+
+            showToast(`กำลังส่งข้อมูลชุมนุมจำนวน ${batch.length} ชุมนุม เข้าสู่ระบบฐานข้อมูล...`, "info");
+
             const { error } = await supabaseClient
                 .from("clubs")
                 .insert(batch);
@@ -1230,7 +1256,73 @@ async function handleClubsCSVImport(event) {
         }
     };
     
-    reader.readAsText(file, "UTF-8");
+    reader.readAsArrayBuffer(file);
+}
+
+// 📥 ดาวน์โหลดไฟล์เทมเพลตรายชื่อนักเรียน (.xlsx)
+function downloadStudentTemplate() {
+    if (typeof XLSX === 'undefined') {
+        showToast("ไม่พบไลบรารีสำหรับประมวลผลไฟล์ Excel (SheetJS)", "error");
+        return;
+    }
+
+    const data = [
+        ["student_id", "first_name", "last_name", "level"],
+        ["10001", "สมชาย", "ใจดี", "ม.4/1"],
+        ["10002", "สมหญิง", "รักเรียน", "ม.4/2"],
+        ["10003", "ศรัญญู", "มุ่งมั่น", "ม.5/3"],
+        ["10004", "นภาพร", "เรียนดี", "ม.6/1"]
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(data);
+    
+    // ตั้งค่าความกว้างคอลัมน์ให้อ่านง่าย
+    ws['!cols'] = [
+        { wch: 15 }, // student_id
+        { wch: 15 }, // first_name
+        { wch: 15 }, // last_name
+        { wch: 10 }  // level
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "รายชื่อนักเรียน");
+    
+    XLSX.writeFile(wb, "เทมเพลตรายชื่อนักเรียน.xlsx");
+    showToast("ดาวน์โหลดเทมเพลตรายชื่อนักเรียนสำเร็จ", "success");
+}
+
+// 📥 ดาวน์โหลดไฟล์เทมเพลตรายชื่อชุมนุม (.xlsx)
+function downloadClubTemplate() {
+    if (typeof XLSX === 'undefined') {
+        showToast("ไม่พบไลบรารีสำหรับประมวลผลไฟล์ Excel (SheetJS)", "error");
+        return;
+    }
+
+    const data = [
+        ["name", "teacher", "location", "capacity", "description", "grades"],
+        ["ชุมนุมฟุตบอลชาย", "ครูสมชาย ใจดี", "สนามฟุตบอล", "40", "ฝึกทักษะกีฬาฟุตบอลและการเล่นเป็นทีม", "ม.1;ม.2;ม.3;ม.4;ม.5;ม.6"],
+        ["ชุมนุมคอมพิวเตอร์และหุ่นยนต์", "ครูสมหญิง รักเรียน", "ห้องคอมพิวเตอร์ 3", "30", "เรียนรู้การเขียนโปรแกรมและการประกอบหุ่นยนต์เบื้องต้น", "ม.4;ม.5;ม.6"],
+        ["ชุมนุมดนตรีไทย", "ครูศรัญญู มุ่งมั่น", "ห้องดนตรีไทย", "20", "ฝึกฝนการเล่นเครื่องดนตรีไทยประเภทต่างๆ", "ม.1;ม.2;ม.3;ม.4;ม.5;ม.6"],
+        ["ชุมนุมอนุรักษ์ธรรมชาติ", "ครูนภาพร เรียนดี", "สวนป่าโรงเรียน", "35", "ศึกษาเรียนรู้ธรรมชาติและการอนุรักษ์สิ่งแวดล้อม", "ม.1;ม.2;ม.3"]
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(data);
+
+    // ตั้งค่าความกว้างคอลัมน์ให้อ่านง่าย
+    ws['!cols'] = [
+        { wch: 25 }, // name
+        { wch: 20 }, // teacher
+        { wch: 15 }, // location
+        { wch: 10 }, // capacity
+        { wch: 35 }, // description
+        { wch: 25 }  // grades
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "รายชื่อชุมนุม");
+    
+    XLSX.writeFile(wb, "เทมเพลตรายชื่อชุมนุม.xlsx");
+    showToast("ดาวน์โหลดเทมเพลตรายชื่อชุมนุมสำเร็จ", "success");
 }
 
 
