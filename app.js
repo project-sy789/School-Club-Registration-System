@@ -1139,6 +1139,12 @@ async function saveClubForm() {
     try {
         if (clubId) {
             // โหมดแก้ไข
+            const existingClub = state.clubs.find(c => c.id === clubId);
+            if (existingClub && capacity < existingClub.enrolled_count) {
+                showToast(`ไม่สามารถปรับลดโควตาเหลือน้อยกว่า ${existingClub.enrolled_count} ที่นั่งได้ เนื่องจากมีนักเรียนลงทะเบียนไปแล้ว ${existingClub.enrolled_count} คน (หากต้องการลด กรุณายกเลิกสิทธิ์นักเรียนบางคนออกก่อน)`, "error");
+                return;
+            }
+
             const { error } = await supabaseClient
                 .from("clubs")
                 .update(payload)
@@ -1189,17 +1195,74 @@ async function deleteClub(clubId, clubName) {
     }
 }
 
-// 👥 ดึงรายชื่อนักเรียนที่มีในระบบ (สำหรับ bulk import)
-async function loadStudentsList() {
-    if (!supabaseClient) return;
-    const tbody = document.getElementById("admin-students-list-tbody");
-    
+// 👥 ดึงรายชื่อนักเรียนที่มีในระบบ (สำหรับ bulk import และแสดงฐานข้อมูลนักเรียน)
+let hasPopulatedStudentLevels = false;
+
+async function populateStudentLevelDropdown() {
+    const filterSelect = document.getElementById("admin-student-level-filter");
+    if (!filterSelect || hasPopulatedStudentLevels) return;
+
     try {
         const { data, error } = await supabaseClient
             .from("students")
-            .select("*")
+            .select("level");
+        
+        if (error) throw error;
+        
+        if (data) {
+            const levels = [...new Set(data.map(item => item.level).filter(Boolean))];
+            // จัดเรียงระดับชั้น/ห้อง (เช่น ม.1/1, ม.1/2)
+            levels.sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
+            
+            const prevVal = filterSelect.value;
+            filterSelect.innerHTML = '<option value="" style="background: #0d281a; color: var(--text-primary);">-- เลือกห้องเรียนทั้งหมด --</option>';
+            
+            levels.forEach(lvl => {
+                const option = document.createElement("option");
+                option.value = lvl;
+                option.textContent = lvl;
+                option.style.background = "#0d281a";
+                option.style.color = "var(--text-primary)";
+                filterSelect.appendChild(option);
+            });
+            
+            filterSelect.value = prevVal;
+            hasPopulatedStudentLevels = true;
+        }
+    } catch (e) {
+        console.error("Error populating student levels:", e);
+    }
+}
+
+function filterAdminStudentsList() {
+    loadStudentsList();
+}
+
+async function loadStudentsList() {
+    if (!supabaseClient) return;
+    const tbody = document.getElementById("admin-students-list-tbody");
+    const searchVal = document.getElementById("admin-student-search-input")?.value.trim() || "";
+    const levelVal = document.getElementById("admin-student-level-filter")?.value || "";
+    
+    try {
+        let query = supabaseClient.from("students").select("*");
+        
+        if (searchVal) {
+            // หากเป็นตัวเลขล้วนให้ค้นหารหัสประจำตัวนักเรียน
+            if (/^\d+$/.test(searchVal)) {
+                query = query.ilike("student_id", `%${searchVal}%`);
+            } else {
+                query = query.or(`first_name.ilike.%${searchVal}%,last_name.ilike.%${searchVal}%`);
+            }
+        }
+        
+        if (levelVal) {
+            query = query.eq("level", levelVal);
+        }
+        
+        const { data, error } = await query
             .order("student_id", { ascending: true })
-            .limit(100); // ดึงมาพรีวิว 100 แถวแรก
+            .limit(100); // แสดงพรีวิวสูงสุด 100 รายการแรก
 
         if (error) throw error;
 
@@ -1216,13 +1279,17 @@ async function loadStudentsList() {
                 tbody.appendChild(row);
             });
         } else {
-            tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-muted);">ไม่มีข้อมูลนักเรียนในระบบ กรุณานำเข้าผ่าน CSV ด้านบน</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 1.5rem 0;">ไม่พบข้อมูลนักเรียนที่ตรงตามเงื่อนไขการค้นหา</td></tr>`;
         }
+
+        // ดึงรายการห้องทั้งหมดมาใส่ใน dropdown
+        await populateStudentLevelDropdown();
     } catch (e) {
         console.error("Error loading students list:", e);
         tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--status-danger);">ไม่สามารถดาวน์โหลดรายชื่อจากฐานข้อมูลได้</td></tr>`;
     }
 }
+
 
 // 🟢 อัปโหลดรายชื่อเด็ก bulk import ผ่านหน้าบ้าน CSV/Excel
 async function handleStudentCSVImport(event) {
