@@ -570,6 +570,32 @@ async function verifyStudentID() {
     }
 }
 
+// 🔵 สลับเข้าโหมดกรอกข้อมูลด้วยตนเองสำหรับนักเรียนใหม่/ไม่มีเลขประจำตัว
+function enableNewStudentManualEntry() {
+    state.currentStudentInfo = null;
+    document.getElementById("student-id-input").value = "";
+    
+    const alertBox = document.getElementById("verify-alert-box");
+    alertBox.style.display = "flex";
+    alertBox.className = "verification-alert pending";
+    alertBox.innerHTML = `
+        <i class="fa-solid fa-user-plus"></i> 
+        <div>
+            <strong>โหมดลงทะเบียนนักเรียนใหม่ (ไม่มีเลขประจำตัว):</strong><br>
+            <span style="font-size:0.85rem; opacity:0.95;">กรุณากรอก คำนำหน้า ชื่อจริง นามสกุล และระดับชั้นจริงที่แบบฟอร์มด้านล่างเพื่อสำรองสิทธิ์เข้าชุมนุมนี้ทันที!</span>
+        </div>
+    `;
+    
+    // ล้างข้อมูลฟอร์มเดิมเพื่อความถูกต้องในการสมัครใหม่
+    document.getElementById("prefix-input").value = "";
+    document.getElementById("first-name-input").value = "";
+    document.getElementById("last-name-input").value = "";
+    document.getElementById("level-input").value = "";
+    
+    // เปิดสวิตช์ฟิลด์กรอกข้อมูล
+    document.getElementById("manual-entry-form").classList.add("active");
+}
+
 // ⚡ บันทึกการลงทะเบียนอย่างปลอดภัยแบบรองรับ Concurrent 800 คน
 async function submitStudentRegistration() {
     if (!supabaseClient || !state.currentClub) return;

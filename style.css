@@ -736,6 +736,30 @@ input[type="checkbox"]:checked + .toggle-switch::after {
     box-shadow: var(--shadow-glow);
 }
 
+.bypass-verification-container {
+    text-align: right;
+    margin-top: -10px;
+    margin-bottom: 12px;
+}
+
+.bypass-verification-container a {
+    color: var(--accent-mint);
+    font-size: 0.85rem;
+    text-decoration: none;
+    font-weight: 500;
+    transition: var(--transition-smooth);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    opacity: 0.85;
+}
+
+.bypass-verification-container a:hover {
+    opacity: 1;
+    text-decoration: underline;
+    text-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
+}
+
 /* Smart Info Banner */
 .verification-alert {
     padding: 12px;
