@@ -308,11 +308,19 @@
                         <div class="admin-content-header">
                             <div>
                                 <h3>จัดการข้อมูลชุมนุมและโควตา</h3>
-                                <p style="color: var(--text-secondary); font-size: 0.9rem;">คุณสามารถเพิ่ม ลบ หรือแก้ไขข้อมูลชุมนุมที่มีอยู่ได้ที่นี่</p>
+                                <p style="color: var(--text-secondary); font-size: 0.9rem;">
+                                    คุณสามารถเพิ่ม ลบ หรือแก้ไขข้อมูลชุมนุมที่มีอยู่ได้ที่นี่ หรือนำเข้าด้วยไฟล์ CSV (คอลัมน์: <strong>name, teacher, location, capacity, description, grades</strong>)
+                                </p>
                             </div>
-                            <button class="btn-primary" onclick="openClubFormModal()">
-                                <i class="fa-solid fa-plus"></i> เพิ่มชุมนุมใหม่
-                            </button>
+                            <div style="display: flex; gap: 0.75rem; align-items: center;">
+                                <button class="btn-small-success" onclick="document.getElementById('csv-clubs-file-input').click()">
+                                    <i class="fa-solid fa-file-csv"></i> นำเข้าชุมนุมผ่าน CSV
+                                </button>
+                                <input type="file" id="csv-clubs-file-input" accept=".csv" style="display: none;" onchange="handleClubsCSVImport(event)">
+                                <button class="btn-primary" onclick="openClubFormModal()">
+                                    <i class="fa-solid fa-plus"></i> เพิ่มชุมนุมใหม่
+                                </button>
+                            </div>
                         </div>
 
                         <div class="search-results-table-container">

@@ -1156,6 +1156,84 @@ async function handleStudentCSVImport(event) {
     reader.readAsText(file, "UTF-8");
 }
 
+// 🟢 อัปโหลดรายชื่อชุมนุม bulk import ผ่านหน้าบ้าน CSV
+async function handleClubsCSVImport(event) {
+    if (!supabaseClient) return;
+    const file = event.target.files[0];
+    if (!file) return;
+
+    showToast("กำลังเริ่มวิเคราะห์ไฟล์รายชื่อชุมนุม...", "info");
+
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+        const content = e.target.result;
+        const lines = content.split(/\r?\n/);
+        const batch = [];
+
+        // โครงสร้างหัวตาราง CSV: name, teacher, location, capacity, description, grades
+        // วนลูปอ่านข้อมูลข้ามแถวแรก (Headers)
+        for (let i = 1; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+
+            // จัดการ Split comma โดยหลบเว้นวรรค
+            const cols = line.split(",").map(val => val.trim().replace(/^["']|["']$/g, ""));
+            
+            if (cols.length >= 3) {
+                const name = cols[0];
+                const teacher = cols[1];
+                const location = cols[2];
+                const capacity = parseInt(cols[3]) || 40;
+                const description = cols[4] || "";
+                
+                // แยกชั้นเรียนด้วย ; หรือ / หรือ | (ค่าเริ่มต้นคือทุกชั้นปี)
+                const gradesStr = cols[5] || "ม.1,ม.2,ม.3,ม.4,ม.5,ม.6";
+                const grades = gradesStr.split(/[;|/]/).map(g => g.trim()).filter(Boolean);
+
+                batch.push({
+                    name,
+                    teacher,
+                    location,
+                    capacity,
+                    description,
+                    grades
+                });
+            }
+        }
+
+        if (batch.length === 0) {
+            showToast("โครงสร้างไฟล์ CSV ไม่ถูกต้อง หรือไม่มีแถวข้อมูลที่สามารถนำเข้าได้", "error");
+            return;
+        }
+
+        showToast(`กำลังส่งข้อมูลชุมนุมจำนวน ${batch.length} ชุมนุม เข้าสู่ระบบฐานข้อมูล...`, "info");
+
+        try {
+            // แทรกรายชื่อชุมนุมทั้งหมด
+            const { error } = await supabaseClient
+                .from("clubs")
+                .insert(batch);
+
+            if (error) throw error;
+
+            showToast(`นำเข้าฐานข้อมูลชุมนุมสำเร็จรวม ${batch.length} รายการ!`, "success");
+            
+            // โหลดข้อมูลชุมนุมใหม่
+            loadClubsData();
+            
+            if (state.isAdminLoggedIn) {
+                loadAdminDashboardData();
+            }
+        } catch (err) {
+            console.error("Error importing bulk clubs data:", err);
+            showToast("เกิดข้อผิดพลาดในการ Bulk อัปเดตรายชื่อชุมนุมสู่ Supabase", "error");
+        }
+    };
+    
+    reader.readAsText(file, "UTF-8");
+}
+
+
 // ⚙️ Render ข้อมูลหน้าตั้งค่าระบบ
 function renderAdminSettings() {
     const config = state.settings.school_config || {};
