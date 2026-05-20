@@ -1328,3 +1328,15 @@ input[type="checkbox"]:checked + .toggle-switch::after {
 .toast-notification.success i { color: var(--status-success); }
 .toast-notification.error i { color: var(--status-danger); }
 .toast-notification.info i { color: var(--status-pending); }
+
+/* 📱 Responsive registrations-search-bar */
+@media (max-width: 768px) {
+    .registrations-search-bar {
+        flex-direction: column;
+    }
+    .registrations-search-bar select,
+    .registrations-search-bar input,
+    .registrations-search-bar button {
+        width: 100% !important;
+    }
+}

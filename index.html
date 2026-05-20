@@ -129,12 +129,15 @@
                 <div class="admin-content-header" style="margin-bottom: 1rem;">
                     <h3><i class="fa-solid fa-magnifying-glass" style="color: var(--accent-mint);"></i> ค้นหาและตรวจสอบผลการลงทะเบียน</h3>
                     <p style="color: var(--text-secondary); width: 100%; font-size: 0.9rem; margin-top: 5px;">
-                        คุณสามารถค้นหาประวัติการลงทะเบียนได้โดยระบุ เลขประจำตัวนักเรียน หรือ ชื่อ-นามสกุล ของนักเรียน
+                        คุณสามารถกรอกเลขประจำตัว ชื่อ-นามสกุล หรือชื่อชุมนุมเพื่อค้นหา หรือเลือกจากรายชื่อชุมนุมเพื่อแสดงรายชื่อทั้งหมด
                     </p>
                 </div>
                 
                 <div class="registrations-search-bar">
-                    <input type="text" id="reg-search-input" placeholder="กรอกเลขประจำตัวนักเรียน หรือชื่อ-นามสกุล เพื่อค้นหา..." onkeypress="handleSearchRegKeyPress(event)">
+                    <select id="reg-club-select" onchange="handleClubSelectChange(event)" style="background: rgba(7, 23, 15, 0.6); border: var(--border-glass); color: var(--text-primary); padding: 12px 18px; border-radius: var(--border-radius-sm); font-size: 1rem; outline: none; cursor: pointer; min-width: 250px;">
+                        <option value="" style="background: #0d281a; color: var(--text-primary);">-- เลือกจากรายชื่อชุมนุม --</option>
+                    </select>
+                    <input type="text" id="reg-search-input" placeholder="กรอกเลขประจำตัว, ชื่อ-นามสกุล หรือชื่อชุมนุม..." onkeypress="handleSearchRegKeyPress(event)">
                     <button class="btn-primary" onclick="searchStudentRegistrations()">
                         <i class="fa-solid fa-magnifying-glass"></i> ค้นหาข้อมูล
                     </button>

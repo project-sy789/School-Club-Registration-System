@@ -206,6 +206,8 @@ function switchTab(tabId) {
 
     if (tabId === 'home') {
         loadClubsData();
+    } else if (tabId === 'search') {
+        populateSearchClubDropdown();
     } else if (tabId === 'admin' && state.isAdminLoggedIn) {
         loadAdminDashboardData();
     }
@@ -579,25 +581,49 @@ async function searchStudentRegistrations() {
     const resultsContainer = document.getElementById("reg-search-results-container");
     const resultsBody = document.getElementById("reg-search-results-body");
     const emptyState = document.getElementById("reg-search-empty-state");
+    const clubSelect = document.getElementById("reg-club-select");
 
     if (!term) {
         showToast("กรุณากรอกคำที่ต้องการค้นหา", "warning");
         return;
     }
 
+    // รีเซ็ตตัวเลือกใน dropdown ชุมนุม เพื่อไม่ให้สับสน
+    if (clubSelect) clubSelect.value = "";
+
     resultsContainer.style.display = "none";
     emptyState.style.display = "block";
     emptyState.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin" style="font-size:2.5rem; color:var(--accent-mint); margin-bottom:1rem;"></i><p>กำลังค้นหาข้อมูลการลงทะเบียน...</p>`;
 
     try {
-        // ดึงการลงทะเบียนของเด็กพร้อมชื่อชุมนุม
+        // 1. ค้นหาชุมนุมที่มีชื่อตรงกับคำค้นหาก่อน เพื่อเก็บ IDs
+        let clubIds = [];
+        try {
+            const { data: matchedClubs, error: clubErr } = await supabaseClient
+                .from("clubs")
+                .select("id")
+                .ilike("name", `%${term}%`);
+            
+            if (!clubErr && matchedClubs) {
+                clubIds = matchedClubs.map(c => c.id);
+            }
+        } catch (err) {
+            console.error("Error fetching matching clubs:", err);
+        }
+
+        // 2. ดึงการลงทะเบียนของเด็กพร้อมชื่อชุมนุม (ดึงตามรหัสนักเรียน ชื่อนักเรียน หรือรหัสชุมนุมที่แมตช์)
+        let orFilter = `student_id.eq.${term},first_name.ilike.%${term}%,last_name.ilike.%${term}%`;
+        if (clubIds.length > 0) {
+            orFilter += `,club_id.in.(${clubIds.join(',')})`;
+        }
+
         const { data, error } = await supabaseClient
             .from("registrations")
             .select(`
                 *,
                 clubs ( name, teacher )
             `)
-            .or(`student_id.eq.${term},first_name.ilike.%${term}%,last_name.ilike.%${term}%`);
+            .or(orFilter);
 
         if (error) throw error;
 
@@ -642,6 +668,107 @@ async function searchStudentRegistrations() {
 function handleSearchRegKeyPress(event) {
     if (event.key === "Enter") {
         searchStudentRegistrations();
+    }
+}
+
+// 🏫 ดึงและเติมตัวเลือกรายชื่อชุมนุมในหน้าค้นหาผลการลงทะเบียน
+async function populateSearchClubDropdown() {
+    const select = document.getElementById("reg-club-select");
+    if (!select) return;
+
+    // ถ้าไม่มีข้อมูลชุมนุมใน state ให้โหลดก่อน
+    if (!state.clubs || state.clubs.length === 0) {
+        await loadClubsData();
+    }
+
+    select.innerHTML = '<option value="" style="background: #0d281a; color: var(--text-primary);">-- เลือกจากรายชื่อชุมนุม --</option>';
+    
+    // เรียงตามชื่อชุมนุมภาษาไทย
+    const sortedClubs = [...state.clubs].sort((a, b) => a.name.localeCompare(b.name, 'th'));
+    
+    sortedClubs.forEach(club => {
+        const option = document.createElement("option");
+        option.value = club.id;
+        option.textContent = `${club.name} (${club.enrolled_count}/${club.capacity} คน)`;
+        option.style.background = "#0d281a";
+        option.style.color = "var(--text-primary)";
+        select.appendChild(option);
+    });
+}
+
+// 🏫 จัดการเมื่อมีการเลือกชุมนุมใน dropdown ค้นหา
+async function handleClubSelectChange(event) {
+    const clubId = event.target.value;
+    const searchInput = document.getElementById("reg-search-input");
+    const resultsContainer = document.getElementById("reg-search-results-container");
+    const resultsBody = document.getElementById("reg-search-results-body");
+    const emptyState = document.getElementById("reg-search-empty-state");
+
+    if (!clubId) {
+        resultsContainer.style.display = "none";
+        emptyState.style.display = "block";
+        emptyState.innerHTML = `
+            <i class="fa-regular fa-folder-open" style="font-size: 3rem; color: var(--text-muted); margin-bottom: 1rem;"></i>
+            <p>กรุณากรอกเลขประจำตัว หรือเลือกชุมนุมเพื่อค้นหาข้อมูล</p>
+        `;
+        return;
+    }
+
+    // ล้างข้อความในช่องค้นหาเดิมเพื่อไม่ให้สับสน
+    searchInput.value = "";
+
+    resultsContainer.style.display = "none";
+    emptyState.style.display = "block";
+    emptyState.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin" style="font-size:2.5rem; color:var(--accent-mint); margin-bottom:1rem;"></i><p>กำลังค้นหาข้อมูลการลงทะเบียน...</p>`;
+
+    try {
+        const { data, error } = await supabaseClient
+            .from("registrations")
+            .select(`
+                *,
+                clubs ( name, teacher )
+            `)
+            .eq("club_id", clubId)
+            .order("created_at", { ascending: true });
+
+        if (error) throw error;
+
+        if (data && data.length > 0) {
+            resultsBody.innerHTML = "";
+            data.forEach(reg => {
+                const date = new Date(reg.created_at).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" });
+                const statusBadge = reg.registration_status === 'verified' 
+                    ? `<span class="ticket-status-badge verified" style="font-size:0.75rem;">ยืนยันสิทธิ์แล้ว</span>`
+                    : `<span class="ticket-status-badge pending" style="font-size:0.75rem;">สำรองสิทธิ์ (Pending)</span>`;
+
+                const row = document.createElement("tr");
+                row.innerHTML = `
+                    <td><strong>${reg.student_id || "นักเรียนใหม่"}</strong></td>
+                    <td>${reg.first_name} ${reg.last_name}</td>
+                    <td>${reg.level}</td>
+                    <td style="color:var(--accent-mint); font-weight:600;">${reg.clubs ? reg.clubs.name : "ไม่ระบุ"}</td>
+                    <td>${reg.clubs ? reg.clubs.teacher : "ไม่ระบุ"}</td>
+                    <td>${statusBadge}</td>
+                    <td style="font-size:0.85rem; color:var(--text-secondary);">${date} น.</td>
+                `;
+                resultsBody.appendChild(row);
+            });
+
+            emptyState.style.display = "none";
+            resultsContainer.style.display = "block";
+        } else {
+            emptyState.style.display = "block";
+            const selectedClubName = event.target.options[event.target.selectedIndex].text.split('(')[0].trim();
+            emptyState.innerHTML = `
+                <i class="fa-regular fa-face-frown" style="font-size: 3rem; color: var(--text-muted); margin-bottom: 1rem;"></i>
+                <p>ยังไม่มีนักเรียนลงทะเบียนใน "${selectedClubName}" ในขณะนี้</p>
+            `;
+        }
+    } catch (e) {
+        console.error("Error searching registrations by club:", e);
+        showToast("เกิดข้อผิดพลาดในการดึงรายชื่อผู้สมัครรายชุมนุม", "error");
+        emptyState.style.display = "block";
+        emptyState.innerHTML = `<p>เกิดข้อผิดพลาดทางเทคนิคในการเรียกฐานข้อมูล</p>`;
     }
 }
 
