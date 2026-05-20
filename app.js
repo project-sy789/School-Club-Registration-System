@@ -460,13 +460,14 @@ async function quickVerifyStudent() {
 
             updateQuickVerifyUI();
 
-            showToast(`ยินดีต้อนรับคุณ ${data.prefix || ""}${data.first_name} ${data.last_name} (${data.level})! ระบบคัดกรองระดับชั้น ${levelPrefix} ให้โดยอัตโนมัติแล้ว`, "success");
+            showToast("ยินดีต้อนรับคุณ ${data.prefix || ""}${data.first_name} ${data.last_name} (${data.level})! ระบบคัดกรองระดับชั้น ${levelPrefix} ให้โดยอัตโนมัติแล้ว", "success");
             
             // รีเรนเดอร์บอร์ดแสดงรายชื่อชุมนุมใหม่
             renderClubsGrid();
         } else {
-            showToast("ไม่พบรหัสประจำตัวนักเรียนนี้ในฐานข้อมูล (หากเป็นเด็กย้ายเข้าใหม่ สามารถกรอกสมัครมือได้หลังจากกดปุ่มลงทะเบียนเรียนครับ)", "warning");
+            showToast("ไม่พบรหัสประจำตัว กรุณากรอกประวัติล่วงหน้าเพื่อเตรียมพร้อมลงทะเบียนชุมนุม", "warning");
             state.currentStudentInfo = null;
+            state.pendingNewStudentId = idInput;
             updateQuickVerifyUI();
         }
     } catch (e) {
@@ -492,7 +493,7 @@ function updateQuickVerifyUI() {
         
         wrapper.innerHTML = `
             <label style="color: var(--accent-mint); font-size: 0.85rem; font-weight: 600; display: flex; align-items: center; gap: 6px;">
-                <i class="fa-solid fa-circle-check"></i> ยืนยันตัวตนสำเร็จแล้ว
+                <i class="fa-solid fa-circle-check"></i> ยืนยันตัวตน/เตรียมข้อมูลสำเร็จแล้ว
             </label>
             <div style="background: rgba(52, 211, 153, 0.1); border: 1px solid rgba(52, 211, 153, 0.35); border-radius: 6px; padding: 6px 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; height: 38px; box-sizing: border-box; width: 100%;">
                 <div style="display: flex; flex-direction: column; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; flex: 1; text-align: left;">
@@ -504,6 +505,41 @@ function updateQuickVerifyUI() {
                 </button>
             </div>
         `;
+    } else if (state.pendingNewStudentId) {
+        wrapper.innerHTML = `
+            <label style="color: #fca5a5; font-size: 0.85rem; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                <i class="fa-solid fa-triangle-exclamation"></i> ไม่พบรหัสนักเรียน: กรุณากรอกประวัติล่วงหน้า
+            </label>
+            <div style="background: rgba(7, 23, 15, 0.7); border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; gap: 8px;">
+                <div style="font-size: 0.8rem; color: var(--text-secondary);">รหัส: <b style="color: white;">${state.pendingNewStudentId}</b> (นักเรียนใหม่)</div>
+                <div style="display: flex; gap: 6px;">
+                    <select id="quick-prefix" style="background: rgba(7, 23, 15, 0.9); border: var(--border-glass); color: white; padding: 6px; border-radius: 4px; font-size: 0.8rem; width: 35%;">
+                        <option value="">คำนำหน้า</option>
+                        <option value="เด็กชาย">เด็กชาย</option>
+                        <option value="เด็กหญิง">เด็กหญิง</option>
+                        <option value="นาย">นาย</option>
+                        <option value="นางสาว">นางสาว</option>
+                    </select>
+                    <select id="quick-level" style="background: rgba(7, 23, 15, 0.9); border: var(--border-glass); color: white; padding: 6px; border-radius: 4px; font-size: 0.8rem; flex: 1;">
+                        <option value="">ระดับชั้น (เช่น ม.4/1)</option>
+                    </select>
+                </div>
+                <div style="display: flex; gap: 6px;">
+                    <input type="text" id="quick-firstname" placeholder="ชื่อจริง" style="background: rgba(7, 23, 15, 0.9); border: var(--border-glass); color: white; padding: 6px; border-radius: 4px; font-size: 0.8rem; flex: 1;">
+                    <input type="text" id="quick-lastname" placeholder="นามสกุล" style="background: rgba(7, 23, 15, 0.9); border: var(--border-glass); color: white; padding: 6px; border-radius: 4px; font-size: 0.8rem; flex: 1;">
+                </div>
+                <div style="display: flex; gap: 6px; margin-top: 4px;">
+                    <button class="btn-primary" onclick="saveQuickNewStudent()" style="flex: 1; padding: 6px; font-size: 0.85rem; border-radius: 4px; display: flex; justify-content: center; height: 32px;"><i class="fa-solid fa-save" style="margin-right: 5px;"></i> บันทึกเตรียมพร้อม</button>
+                    <button class="btn-secondary" onclick="cancelQuickNewStudent()" style="padding: 6px 12px; font-size: 0.85rem; border-radius: 4px; height: 32px;">ยกเลิก</button>
+                </div>
+            </div>
+        `;
+        // คัดลอกตัวเลือกห้องจาก Modal มาใส่ให้
+        const modalSelect = document.getElementById("level-input");
+        if (modalSelect && modalSelect.options.length > 1) {
+            document.getElementById("quick-level").innerHTML = modalSelect.innerHTML;
+            document.getElementById("quick-level").value = "";
+        }
     } else {
         wrapper.innerHTML = `
             <label for="student-quick-id">ระบุตัวตน (กรอกรหัสเพื่อคัดกรองออโต้)</label>
@@ -517,6 +553,46 @@ function updateQuickVerifyUI() {
             </div>
         `;
     }
+}
+
+// 💾 บันทึกข้อมูลนักเรียนใหม่ล่วงหน้าลงใน State (เพื่อความพร้อม)
+function saveQuickNewStudent() {
+    const prefix = document.getElementById("quick-prefix").value;
+    const level = document.getElementById("quick-level").value;
+    const firstName = document.getElementById("quick-firstname").value.trim();
+    const lastName = document.getElementById("quick-lastname").value.trim();
+
+    if (!prefix || !level || !firstName || !lastName || level === "custom") {
+        showToast("กรุณากรอกข้อมูล คำนำหน้า ชื่อ นามสกุล และระดับชั้นให้ครบถ้วน", "warning");
+        return;
+    }
+
+    state.currentStudentInfo = {
+        student_id: state.pendingNewStudentId,
+        prefix: prefix,
+        first_name: firstName,
+        last_name: lastName,
+        level: level
+    };
+    state.pendingNewStudentId = null;
+
+    const levelPrefix = level.split('/')[0];
+    document.getElementById("filter-grade").value = levelPrefix;
+    
+    const checkbox = document.getElementById("my-grades-only");
+    if (checkbox) {
+        checkbox.checked = true;
+        state.myGradesFilterOnly = true;
+    }
+
+    updateQuickVerifyUI();
+    showToast("เตรียมข้อมูลสำเร็จ! ระบบจำชื่อคุณไว้แล้ว เมื่อถึงเวลาสามารถกดลงทะเบียนชุมนุมได้ทันที", "success");
+    renderClubsGrid();
+}
+
+function cancelQuickNewStudent() {
+    state.pendingNewStudentId = null;
+    updateQuickVerifyUI();
 }
 
 // 🔓 ยกเลิกการระบุตัวตนของนักเรียน
