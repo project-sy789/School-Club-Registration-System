@@ -7,7 +7,7 @@
     <meta name="description" content="ระบบสมัครเรียนและลงทะเบียนชุมนุมสำหรับนักเรียนระดับมัธยมศึกษาตอนต้นและตอนปลาย รองรับผู้เข้าใช้งานหนาแน่นอย่างรวดเร็วและปลอดภัย พร้อมระบบสำรองสิทธิ์สำหรับนักเรียนใหม่">
     
     <!-- 🎨 CSS Stylesheets & Icons -->
-    <link rel="stylesheet" href="style.css?v=1.1.7">
+    <link rel="stylesheet" href="style.css?v=1.1.8">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
     <!-- 🚀 External Libraries (Supabase and Confetti) via CDN -->
@@ -587,8 +587,49 @@
                 </div>
 
                 <div class="modal-form">
-                    <!-- ส่วนตรวจสอบสิทธิ์ด้วยเลขประจำตัว -->
-                    <div class="id-verification-row">
+                    <!-- 🔒 หน้าต่างเตือนสำหรับนักเรียนที่ยังไม่ได้ระบุตัวตน (Unverified Lock View) -->
+                    <div id="modal-unverified-view" style="display: none;" class="unverified-card">
+                        <div class="lock-icon-container">
+                            <div class="lock-pulse-ring"></div>
+                            <i class="fa-solid fa-user-lock lock-icon"></i>
+                        </div>
+                        <h4 class="unverified-title">ยังไม่ได้ระบุตัวตนเข้าสู่ระบบ</h4>
+                        <p class="unverified-desc">
+                            กรุณาระบุตัวตนหรือกรอกข้อมูลนักเรียนใหม่ที่แผง <strong>"ระบุตัวตนก่อนเลือกชุมนุม"</strong> บนหน้าแรกของเว็บไซต์ก่อน เพื่อให้ระบบกรองสิทธิ์และจับคู่ระดับชั้นได้อย่างถูกต้องและรวดเร็ว
+                        </p>
+                        <button class="unverified-action-btn" onclick="scrollToIdentityPanel()">
+                            <i class="fa-solid fa-arrow-pointer"></i> ไปยังแผงระบุตัวตนหน้าแรก
+                        </button>
+                    </div>
+
+                    <!-- 🟢 บัตรโปรไฟล์นักเรียนที่ระบุตัวตนแล้ว (Verified Profile Card) -->
+                    <div id="modal-verified-view" style="display: none;" class="verified-profile-card">
+                        <div class="verified-card-badge">
+                            <i class="fa-solid fa-circle-check"></i> ระบุตัวตนสำเร็จ
+                        </div>
+                        <div class="student-avatar">
+                            <i class="fa-solid fa-user-graduate"></i>
+                        </div>
+                        <div class="student-profile-info">
+                            <div class="profile-row">
+                                <span class="profile-label">ชื่อ-นามสกุล:</span>
+                                <span class="profile-value" id="modal-verified-name">-</span>
+                            </div>
+                            <div class="profile-row">
+                                <span class="profile-label">รหัสอ้างอิง:</span>
+                                <span class="profile-value" id="modal-verified-id">-</span>
+                            </div>
+                            <div class="profile-row">
+                                <span class="profile-label">ระดับชั้นเรียน:</span>
+                                <span class="profile-value" id="modal-verified-level">-</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- คอนเทนเนอร์เก็บช่องอินพุตดั้งเดิมเพื่อความเข้ากันได้แบบ 100% (ถูกซ่อนโดยเริ่มต้น) -->
+                    <div id="modal-original-inputs-wrapper" style="display: none;">
+                        <!-- ส่วนตรวจสอบสิทธิ์ด้วยเลขประจำตัว -->
+                        <div class="id-verification-row">
                         <div class="input-group">
                             <label for="student-id-input">รหัสอ้างอิง</label>
                             <input type="text" id="student-id-input" placeholder="เลขประจำตัวนักเรียน หรือ เบอร์โทรศัพท์..." onkeypress="handleVerifyIdKeyPress(event)">
@@ -659,6 +700,8 @@
                             <input type="text" id="level-custom-input" placeholder="ระบุชั้น/ห้องเรียนของท่าน..." style="background: rgba(7, 23, 15, 0.7); border: var(--border-glass); color: var(--text-primary); padding: 8px 10px; border-radius: 6px; font-size: 0.9rem;">
                         </div>
                     </div>
+
+                    </div> <!-- ปิด #modal-original-inputs-wrapper -->
 
                     <button class="register-btn active" style="margin-top: 1rem;" id="submit-registration-btn" onclick="submitStudentRegistration()">
                         <i class="fa-solid fa-signature"></i> ยืนยันสมัครเข้าชุมนุมนี้
@@ -907,6 +950,6 @@
     <!-- 💻 6. Javascript Logic Engine -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="config.js?v=1.1.2"></script>
-    <script src="app.js?v=1.1.7"></script>
+    <script src="app.js?v=1.1.8"></script>
 </body>
 </html>

@@ -732,9 +732,20 @@ function openRegistrationModal(clubId) {
                 <span style="font-size:0.8rem; opacity:0.85;">ดึงข้อมูลการยืนยันตัวตนจากหน้าแรกอัตโนมัติ กดลงทะเบียนได้ทันที</span>
             </div>
         `;
-    } else if (quickId) {
-        // หากกรอกค้างไว้แต่ยังไม่ได้กดยืนยันตัวตน ให้เรียกฟังก์ชันตรวจสอบออโต้
-        verifyStudentID();
+
+        // อัปเดตข้อมูลการแสดงผลในการ์ดบัตรรวมสไตล์พรีเมียม
+        document.getElementById("modal-verified-name").innerText = displayName;
+        document.getElementById("modal-verified-id").innerText = data.student_id || "นักเรียนใหม่ (รอการจัดเลข)";
+        document.getElementById("modal-verified-level").innerText = data.level;
+
+        document.getElementById("modal-verified-view").style.display = "flex";
+        document.getElementById("modal-unverified-view").style.display = "none";
+        document.getElementById("submit-registration-btn").style.display = "flex";
+    } else {
+        // กรณีที่ไม่ได้กดยืนยันตัวตนจากหน้าแรกมา
+        document.getElementById("modal-verified-view").style.display = "none";
+        document.getElementById("modal-unverified-view").style.display = "flex";
+        document.getElementById("submit-registration-btn").style.display = "none";
     }
     
     // สลับหน้าจอเนื้อหาฟอร์มกลับมา (กรณีคราวก่อนแสดงตั๋วสำเร็จ)
@@ -749,6 +760,31 @@ function closeRegistrationModal() {
     document.getElementById("registration-modal").classList.remove("active");
     state.currentClub = null;
 }
+
+// 🔒 ปิดโมดอล เลื่อนและไฮไลท์แผงตรวจสอบตัวตนหน้าแรก
+function scrollToIdentityPanel() {
+    closeRegistrationModal();
+    const wrapper = document.getElementById("quick-verify-wrapper");
+    if (wrapper) {
+        wrapper.scrollIntoView({ behavior: "smooth", block: "center" });
+        wrapper.classList.add("pulse-highlight");
+        setTimeout(() => {
+            wrapper.classList.remove("pulse-highlight");
+        }, 3000);
+    }
+    const input = document.getElementById("student-quick-id");
+    if (input) {
+        setTimeout(() => {
+            input.focus();
+            input.select();
+        }, 800);
+    }
+}
+
+// ผูกฟังก์ชันเข้ากับ Global window
+window.openRegistrationModal = openRegistrationModal;
+window.closeRegistrationModal = closeRegistrationModal;
+window.scrollToIdentityPanel = scrollToIdentityPanel;
 
 // 🟢 ตรวจสอบเลขนักเรียนกับตาราง students
 async function verifyStudentID() {
