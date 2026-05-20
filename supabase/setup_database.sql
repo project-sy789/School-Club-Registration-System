@@ -31,6 +31,11 @@ INSERT INTO settings (key, value) VALUES
     "end_time": "2026-05-25T16:30:00"
 }'::jsonb);
 
+-- เปิดใช้งาน RLS สำหรับ Settings (เพื่อให้หน้าเว็บอ่านและบันทึกการตั้งค่าระบบได้)
+ALTER TABLE settings ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow public read access to settings" ON settings FOR SELECT USING (true);
+CREATE POLICY "Allow public all access to settings" ON settings FOR ALL USING (true);
+
 
 -- 3. สร้างตารางรายชื่อชุมนุม (Clubs)
 CREATE TABLE clubs (
