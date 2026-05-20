@@ -352,10 +352,62 @@ function toggleFilterMyGrades() {
     state.myGradesFilterOnly = checkbox.checked;
     
     if (state.myGradesFilterOnly && !state.currentStudentInfo) {
-        showToast("กรุณากรอกและตรวจสอบเลขประจำตัวนักเรียนของคุณในฟอร์มลงทะเบียนชุมนุมก่อนเพื่อจดจำระดับชั้นจริง!", "info");
+        showToast("กรุณากรอกเลขประจำตัวนักเรียนของคุณในช่อง 'ระบุตัวตน' ด้านบนก่อนเพื่อค้นหาระดับชั้นจริงโดยอัตโนมัติ!", "info");
     }
     
     renderClubsGrid();
+}
+
+async function quickVerifyStudent() {
+    const idInput = document.getElementById("student-quick-id").value.trim();
+    if (!idInput) {
+        showToast("กรุณากรอกเลขประจำตัวนักเรียนของคุณ", "warning");
+        return;
+    }
+
+    try {
+        const { data, error } = await supabaseClient
+            .from("students")
+            .select("*")
+            .eq("student_id", idInput)
+            .maybeSingle();
+
+        if (error) throw error;
+
+        if (data) {
+            state.currentStudentInfo = data;
+            
+            // 1. ดึงระดับชั้นมา เช่น "ม.4" จาก "ม.4/1"
+            const levelPrefix = data.level.split('/')[0];
+            
+            // 2. อัปเดต dropdown ระดับชั้นที่หน้าแรกให้เป็นห้องเรียนของเด็กโดยอัตโนมัติ
+            document.getElementById("filter-grade").value = levelPrefix;
+            
+            // 3. ติ๊กเลือกเช็คบล็อกกรองเฉพาะระดับชั้นที่ฉันสมัครได้ให้ด้วย
+            const checkbox = document.getElementById("my-grades-only");
+            if (checkbox) {
+                checkbox.checked = true;
+                state.myGradesFilterOnly = true;
+            }
+
+            showToast(`ยินดีต้อนรับคุณ ${data.first_name} ${data.last_name} (${data.level})! ระบบคัดกรองระดับชั้น ${levelPrefix} ให้โดยอัตโนมัติแล้ว`, "success");
+            
+            // รีเรนเดอร์บอร์ดแสดงรายชื่อชุมนุมใหม่
+            renderClubsGrid();
+        } else {
+            showToast("ไม่พบรหัสประจำตัวนักเรียนนี้ในฐานข้อมูล (หากเป็นเด็กย้ายเข้าใหม่ สามารถกรอกสมัครมือได้หลังจากกดปุ่มลงทะเบียนเรียนครับ)", "warning");
+            state.currentStudentInfo = null;
+        }
+    } catch (e) {
+        console.error("Error doing quick verify:", e);
+        showToast("เกิดข้อผิดพลาดในการเชื่อมต่อเพื่อตรวจสอบรหัสประจำตัว", "error");
+    }
+}
+
+function handleQuickIdKeyPress(event) {
+    if (event.key === "Enter") {
+        quickVerifyStudent();
+    }
 }
 
 // =====================================================================
@@ -372,8 +424,9 @@ function openRegistrationModal(clubId) {
     document.getElementById("modal-club-teacher").innerHTML = `<i class="fa-solid fa-user-tie"></i> ครูผู้สอน: ${club.teacher}`;
     document.getElementById("modal-club-location").innerHTML = `<i class="fa-solid fa-location-dot"></i> สถานที่: ${club.location}`;
     
-    // รีเซ็ตการแสดงผล
-    document.getElementById("student-id-input").value = "";
+    // ดึงค่าจากหน้าแรกเพื่อพรีฟิล
+    const quickId = document.getElementById("student-quick-id") ? document.getElementById("student-quick-id").value.trim() : "";
+    document.getElementById("student-id-input").value = quickId;
     document.getElementById("first-name-input").value = "";
     document.getElementById("last-name-input").value = "";
     document.getElementById("level-input").value = "";
@@ -381,6 +434,29 @@ function openRegistrationModal(clubId) {
     document.getElementById("verify-alert-box").style.display = "none";
     document.getElementById("verify-alert-box").className = "verification-alert";
     document.getElementById("manual-entry-form").classList.remove("active");
+    
+    // ดึงค่าสิทธิ์หากเคยระบุและยืนยันตัวตนไว้ที่หน้าแรกแล้ว
+    if (state.currentStudentInfo) {
+        const data = state.currentStudentInfo;
+        document.getElementById("student-id-input").value = data.student_id;
+        document.getElementById("first-name-input").value = data.first_name;
+        document.getElementById("last-name-input").value = data.last_name;
+        document.getElementById("level-input").value = data.level;
+        
+        const alertBox = document.getElementById("verify-alert-box");
+        alertBox.style.display = "flex";
+        alertBox.className = "verification-alert verified";
+        alertBox.innerHTML = `
+            <i class="fa-solid fa-circle-check"></i> 
+            <div>
+                <strong>ยืนยันตัวตนสำเร็จ:</strong> ${data.first_name} ${data.last_name} (${data.level})<br>
+                <span style="font-size:0.8rem; opacity:0.85;">ดึงข้อมูลการยืนยันตัวตนจากหน้าแรกอัตโนมัติ กดลงทะเบียนได้ทันที</span>
+            </div>
+        `;
+    } else if (quickId) {
+        // หากกรอกค้างไว้แต่ยังไม่ได้กดยืนยันตัวตน ให้เรียกฟังก์ชันตรวจสอบออโต้
+        verifyStudentID();
+    }
     
     // สลับหน้าจอเนื้อหาฟอร์มกลับมา (กรณีคราวก่อนแสดงตั๋วสำเร็จ)
     document.getElementById("modal-form-content").style.display = "block";

@@ -76,6 +76,18 @@
                 </div>
                 
                 <div class="input-group">
+                    <label for="student-quick-id">ระบุตัวตน (กรอกรหัสเพื่อคัดกรองออโต้)</label>
+                    <div style="display: flex; gap: 6px; width: 100%;">
+                        <input type="text" id="student-quick-id" placeholder="รหัส 5 หลัก..." 
+                               onkeyup="handleQuickIdKeyPress(event)"
+                               style="background: rgba(7, 23, 15, 0.7); border: var(--border-glass); color: var(--text-primary); padding: 8px 10px; border-radius: 6px; font-size: 0.9rem; flex: 1;">
+                        <button class="btn-primary" onclick="quickVerifyStudent()" style="padding: 0 10px; border-radius: 6px; font-size: 0.85rem; height: 38px; display: flex; align-items: center; justify-content: center; background: var(--accent-mint); border: none; color: #07170f; cursor: pointer; transition: all 0.2s ease;">
+                            <i class="fa-solid fa-user-check"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="input-group">
                     <label for="filter-grade">ระดับชั้นของคุณ</label>
                     <select id="filter-grade" onchange="filterClubs()">
                         <option value="all">แสดงทุกระดับชั้น</option>
