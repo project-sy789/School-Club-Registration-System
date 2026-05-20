@@ -7,7 +7,7 @@
     <meta name="description" content="ระบบสมัครเรียนและลงทะเบียนชุมนุมสำหรับนักเรียนระดับมัธยมศึกษาตอนต้นและตอนปลาย รองรับผู้เข้าใช้งานหนาแน่นอย่างรวดเร็วและปลอดภัย พร้อมระบบสำรองสิทธิ์สำหรับนักเรียนใหม่">
     
     <!-- 🎨 CSS Stylesheets & Icons -->
-    <link rel="stylesheet" href="style.css?v=1.1.4">
+    <link rel="stylesheet" href="style.css?v=1.1.5">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
     <!-- 🚀 External Libraries (Supabase and Confetti) via CDN -->
@@ -610,6 +610,9 @@
 
                     <!-- ส่วนกรอกข้อมูลด้วยตนเอง (จะถูกเปิดเมื่อไม่พบเลขนักเรียนในระบบ หรือเป็นนักเรียนใหม่) -->
                     <div class="manual-entry-area" id="manual-entry-form">
+                        <div style="font-size: 0.9rem; font-weight: 700; color: var(--accent-mint); margin-bottom: -4px; display: flex; align-items: center; gap: 8px;">
+                            <i class="fa-solid fa-user-pen"></i> ข้อมูลเพิ่มเติมสำหรับลงทะเบียน
+                        </div>
                         <div class="form-name-grid">
                             <div class="input-group">
                                 <label for="prefix-input">คำนำหน้า</label>
@@ -675,6 +678,11 @@
                     <div class="ticket-header">
                         <span id="ticket-school-name" style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase;">โรงเรียนมัธยมศึกษารวมวิทยายน</span>
                         <h3 id="ticket-club-name">ชุมนุมวิทยาการคอมพิวเตอร์</h3>
+                    </div>
+                    <div class="ticket-divider">
+                        <span class="cutout left"></span>
+                        <span class="divider-line"></span>
+                        <span class="cutout right"></span>
                     </div>
                     <div class="ticket-details">
                         <div class="ticket-field">
