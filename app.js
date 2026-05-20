@@ -779,7 +779,7 @@ function attemptAdminLogin() {
     const entered = document.getElementById("admin-passcode-input").value;
     const config = state.settings.school_config || {};
     
-    if (entered === (config.admin_password || "admin-password-1234")) {
+    if (entered === (config.admin_password || "admin")) {
         state.isAdminLoggedIn = true;
         document.getElementById("admin-login-area").style.display = "none";
         document.getElementById("admin-dashboard-area").style.display = "grid";

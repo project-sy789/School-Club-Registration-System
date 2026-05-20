@@ -21,7 +21,7 @@ INSERT INTO settings (key, value) VALUES
 ('school_config', '{
     "school_name": "โรงเรียนมัธยมศึกษารวมวิทยายน",
     "semester": "1/2569",
-    "admin_password": "admin-password-1234"
+    "admin_password": "admin"
 }'::jsonb),
 ('registration_period', '{
     "is_active": true,
