@@ -1095,6 +1095,7 @@ input[type="checkbox"]:checked + .toggle-switch::after {
 
 .search-results-table-container {
     overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
     border-radius: var(--border-radius-sm);
     border: var(--border-glass-light);
     max-width: 100%;
@@ -1138,6 +1139,12 @@ input[type="checkbox"]:checked + .toggle-switch::after {
     max-width: 1400px;
     margin: 2rem auto;
     padding: 0 2rem;
+    overflow: hidden;
+}
+
+.admin-sub-view {
+    max-width: 100%;
+    overflow: hidden;
 }
 
 .admin-login-card {
@@ -1208,20 +1215,39 @@ input[type="checkbox"]:checked + .toggle-switch::after {
 .admin-content-card {
     padding: 2.25rem;
     border-radius: var(--border-radius-lg);
+    min-width: 0;
+    overflow: hidden;
+}
+
+@media (max-width: 768px) {
+    .admin-content-card {
+        padding: 1rem;
+    }
 }
 
 .admin-content-header {
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-start;
     margin-bottom: 2rem;
     flex-wrap: wrap;
     gap: 1rem;
 }
 
+@media (max-width: 768px) {
+    .admin-content-header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .admin-content-header > div:last-child {
+        flex-wrap: wrap;
+    }
+}
+
 .admin-content-header h3 {
-    font-size: 1.4rem;
+    font-size: 1.25rem;
     font-weight: 700;
+    word-break: break-word;
 }
 
 /* Overview stats grid */
