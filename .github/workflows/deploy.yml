@@ -1,0 +1,55 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+# กำหนดสิทธิ์สำหรับ GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Inject Supabase Credentials dynamically
+        run: |
+          cat <<EOF > config.js
+          // =====================================================================
+          // 🔑 CONFIGURATION FILE - GENERATED AUTOMATICALLY BY GITHUB ACTIONS SECRETS
+          // =====================================================================
+          const SUPABASE_CONFIG = {
+              SUPABASE_URL: "${{ secrets.SUPABASE_URL }}",
+              SUPABASE_ANON_KEY: "${{ secrets.SUPABASE_ANON_KEY }}"
+          };
+
+          if (typeof window !== 'undefined') {
+              window.SUPABASE_CONFIG = SUPABASE_CONFIG;
+          }
+          EOF
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
