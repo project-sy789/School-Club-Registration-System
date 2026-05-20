@@ -7,7 +7,7 @@
     <meta name="description" content="ระบบสมัครเรียนและลงทะเบียนชุมนุมสำหรับนักเรียนระดับมัธยมศึกษาตอนต้นและตอนปลาย รองรับผู้เข้าใช้งานหนาแน่นอย่างรวดเร็วและปลอดภัย พร้อมระบบสำรองสิทธิ์สำหรับนักเรียนใหม่">
     
     <!-- 🎨 CSS Stylesheets & Icons -->
-    <link rel="stylesheet" href="style.css?v=1.1.5">
+    <link rel="stylesheet" href="style.css?v=1.1.6">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
     <!-- 🚀 External Libraries (Supabase and Confetti) via CDN -->
@@ -769,6 +769,98 @@
         </div>
     </div>
 
+    <!-- 👥 Admin Club Students Management Modal (หน้าต่างจัดการสมาชิกในชุมนุม) -->
+    <div class="modal-overlay" id="admin-club-students-modal">
+        <div class="modal-card glass-container" style="max-width: 750px;">
+            <button class="modal-close" onclick="closeAdminClubStudentsModal()"><i class="fa-solid fa-xmark"></i></button>
+            <div class="modal-title" id="admin-club-students-title">จัดการสมาชิกในชุมนุม</div>
+            <div class="modal-subtitle" id="admin-club-students-subtitle">กำลังโหลดข้อมูล...</div>
+            
+            <!-- ส่วนปุ่มและฟอร์มเพิ่ม/แก้ไขนักเรียนในชุมนุม -->
+            <div style="margin-bottom: 1.5rem;">
+                <button class="btn-secondary" id="admin-toggle-student-form-btn" onclick="toggleAdminStudentForm()" style="width:100%; justify-content:center; gap:8px;">
+                    <i class="fa-solid fa-user-plus"></i> เพิ่มนักเรียนใหม่ในชุมนุมนี้
+                </button>
+                
+                <div id="admin-student-form-container" style="display:none; margin-top:1rem; padding:1.25rem; background:rgba(7,23,15,0.6); border:var(--border-glass); border-radius:12px; animation:slideDown 0.3s ease;">
+                    <h4 id="admin-student-form-title" style="color:var(--accent-mint); margin-bottom:1rem;"><i class="fa-solid fa-user-pen"></i> ข้อมูลนักเรียนที่เพิ่ม</h4>
+                    
+                    <input type="hidden" id="admin-reg-id">
+                    
+                    <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:0.75rem; margin-bottom:1rem;">
+                        <div class="input-group">
+                            <label>รหัสประจำตัวนักเรียน</label>
+                            <input type="text" id="admin-reg-student-id" placeholder="รหัส 5 หลัก (เว้นว่างได้)" onchange="handleAdminStudentIdChange()">
+                        </div>
+                        <div class="input-group">
+                            <label>ระดับชั้น/ห้องเรียน</label>
+                            <input type="text" id="admin-reg-level" placeholder="เช่น ม.4/1, ม.1/3">
+                        </div>
+                        <div class="input-group">
+                            <label>สถานะสิทธิ์</label>
+                            <select id="admin-reg-status">
+                                <option value="verified">Verified (ยืนยันแล้ว)</option>
+                                <option value="pending">Pending (สำรองสิทธิ์)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div style="display:grid; grid-template-columns: 100px 1fr 1fr; gap:0.75rem; margin-bottom:1rem;">
+                        <div class="input-group">
+                            <label>คำนำหน้า</label>
+                            <select id="admin-reg-prefix">
+                                <option value="">คำนำหน้า...</option>
+                                <option value="เด็กชาย">เด็กชาย</option>
+                                <option value="เด็กหญิง">เด็กหญิง</option>
+                                <option value="นาย">นาย</option>
+                                <option value="นางสาว">นางสาว</option>
+                            </select>
+                        </div>
+                        <div class="input-group">
+                            <label>ชื่อจริง</label>
+                            <input type="text" id="admin-reg-first-name" placeholder="ชื่อจริง...">
+                        </div>
+                        <div class="input-group">
+                            <label>นามสกุล</label>
+                            <input type="text" id="admin-reg-last-name" placeholder="นามสกุล...">
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:10px; justify-content:flex-end;">
+                        <button class="btn-secondary" onclick="cancelAdminStudentForm()" style="padding:6px 12px; font-size:0.85rem;">ยกเลิก</button>
+                        <button class="btn-primary" id="admin-student-submit-btn" onclick="saveAdminStudentRegistration()" style="padding:6px 12px; font-size:0.85rem;">
+                            <i class="fa-solid fa-save"></i> บันทึกข้อมูล
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ส่วนค้นหาและแสดงผลรายการ -->
+            <div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
+                    <h4 style="color:var(--text-primary); font-size:1rem;"><i class="fa-solid fa-users" style="color:var(--accent-mint); margin-right:6px;"></i> รายชื่อนักเรียนปัจจุบัน</h4>
+                    <input type="text" id="admin-club-student-search" placeholder="ค้นหาตามชื่อหรือรหัส..." oninput="filterClubStudentsList()" style="background:rgba(7,23,15,0.7); border:var(--border-glass); color:var(--text-primary); padding:6px 10px; border-radius:6px; font-size:0.85rem; width:220px;">
+                </div>
+                
+                <div class="search-results-table-container" style="max-height: 280px; overflow-y: auto;">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 50px;">ลำดับ</th>
+                                <th style="width: 100px;">รหัสนักเรียน</th>
+                                <th>ชื่อ - นามสกุล</th>
+                                <th style="width: 80px;">ห้องเรียน</th>
+                                <th style="width: 120px;">สถานะ</th>
+                                <th style="width: 100px;">การจัดการ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="admin-club-students-tbody">
+                            <!-- จะเติมด้วย JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- 🛠️ 4. Setup Screen overlay (แสดงเฉพาะตอนเปิดใช้ครั้งแรกและยังไม่มีค่า Supabase credentials) -->
     <div class="setup-overlay" id="setup-screen-overlay">
         <div class="setup-card glass-container text-center">
@@ -815,6 +907,6 @@
     <!-- 💻 6. Javascript Logic Engine -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="config.js?v=1.1.2"></script>
-    <script src="app.js?v=1.1.2"></script>
+    <script src="app.js?v=1.1.6"></script>
 </body>
 </html>

@@ -1265,9 +1265,14 @@ function renderAdminStats() {
                 </span>
             </td>
             <td>
-                <button class="btn-small-success" onclick="exportSingleClubToCSV('${club.id}', '${club.name}')">
-                    <i class="fa-solid fa-download"></i> รายชื่อ
-                </button>
+                <div style="display:flex; gap:6px; justify-content:center; flex-wrap:wrap;">
+                    <button class="btn-small" onclick="openAdminClubStudentsModal('${club.id}')" style="background:rgba(52,211,153,0.15); border:1px solid var(--accent-mint); color:var(--accent-mint); padding:4px 8px; border-radius:4px; font-size:0.75rem; display:flex; align-items:center; gap:4px; cursor:pointer;">
+                        <i class="fa-solid fa-users-gear"></i> จัดการ
+                    </button>
+                    <button class="btn-small-success" onclick="exportSingleClubToCSV('${club.id}', '${club.name}')" style="padding:4px 8px; border-radius:4px; font-size:0.75rem; cursor:pointer;">
+                        <i class="fa-solid fa-download"></i> รายชื่อ
+                    </button>
+                </div>
             </td>
         `;
         tbody.appendChild(row);
@@ -2543,3 +2548,466 @@ function clearLogFilters() {
     document.getElementById("admin-log-action-filter").value = "";
     renderAdminLogs(state.auditLogs);
 }
+
+// =====================================================================
+// 👥 ADMIN CLUB STUDENT MEMBERSHIP MANAGEMENT FUNCTIONS
+// =====================================================================
+let currentManagingClubId = null;
+
+// 1. เปิดหน้าต่างจัดการรายชื่อนักเรียนในชุมนุม
+async function openAdminClubStudentsModal(clubId) {
+    if (!supabaseClient) return;
+    currentManagingClubId = clubId;
+
+    const club = state.clubs.find(c => c.id === clubId);
+    if (!club) {
+        showToast("ไม่พบข้อมูลชุมนุมนี้", "error");
+        return;
+    }
+
+    // กำหนดหัวข้อและสถิติเบื้องต้น
+    document.getElementById("admin-club-students-title").innerText = `จัดการสมาชิกในชุมนุม: ${club.name}`;
+    
+    // แสดงสถิติและโควตาชุมนุม
+    const clubRegs = state.registrations.filter(r => r.club_id === clubId);
+    const verifiedCount = clubRegs.filter(r => r.registration_status === 'verified').length;
+    const pendingCount = clubRegs.filter(r => r.registration_status === 'pending').length;
+    document.getElementById("admin-club-students-subtitle").innerText = `ครูผู้ดูแล: ${club.teacher} | สถานที่: ${club.location} | โควตา: ${clubRegs.length}/${club.capacity} คน (ยืนยันสิทธิ์แล้ว: ${verifiedCount} คน, สำรองเด็กใหม่: ${pendingCount} คน)`;
+
+    // ซ่อน/รีเซ็ต ฟอร์มเพิ่มนักเรียนก่อน
+    cancelAdminStudentForm();
+
+    // ล้างและตั้งค่าการค้นหา
+    document.getElementById("admin-club-student-search").value = "";
+
+    // เปิดหน้าต่าง Modal Overlay
+    document.getElementById("admin-club-students-modal").classList.add("active");
+
+    // โหลดประวัติสดจาก Supabase เพื่อให้ข้อมูลแม่นยำที่สุด
+    try {
+        await loadAdminDashboardData();
+        renderClubStudentsList();
+    } catch (e) {
+        console.error("Error refreshing registration list:", e);
+        renderClubStudentsList(); // fallback
+    }
+}
+
+// 2. ปิดหน้าต่างจัดการรายชื่อนักเรียนในชุมนุม
+function closeAdminClubStudentsModal() {
+    document.getElementById("admin-club-students-modal").classList.remove("active");
+    currentManagingClubId = null;
+    
+    // โหลดบอร์ดรายงานสถิติหน้านอกใหม่เพื่อให้ตัวเลข enrolled_count สดอยู่เสมอ
+    if (state.activeAdminSubTab === 'stats') {
+        renderAdminStats();
+    }
+}
+
+// 3. เรนเดอร์รายชื่อนักเรียนลงในตารางสไตล์พรีเมียม
+function renderClubStudentsList() {
+    const tbody = document.getElementById("admin-club-students-tbody");
+    if (!tbody) return;
+    tbody.innerHTML = "";
+
+    if (!currentManagingClubId) return;
+
+    // ดึงและคัดกรองข้อมูลเฉพาะของชุมนุมนี้
+    let clubRegs = state.registrations.filter(r => r.club_id === currentManagingClubId);
+    
+    // คัดกรองตามคำค้นหา (รหัสประจำตัว หรือ ชื่อ-นามสกุล)
+    const searchVal = document.getElementById("admin-club-student-search").value.trim().toLowerCase();
+    if (searchVal) {
+        clubRegs = clubRegs.filter(reg => {
+            const studentId = (reg.student_id || "").toLowerCase();
+            const fullName = `${reg.prefix || ""}${reg.first_name} ${reg.last_name}`.toLowerCase();
+            return studentId.includes(searchVal) || fullName.includes(searchVal);
+        });
+    }
+
+    if (clubRegs.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2rem 0;">
+                    <i class="fa-solid fa-users-slash" style="font-size: 2rem; color: var(--text-muted); margin-bottom: 0.5rem; display:block;"></i>
+                    ไม่พบรายชื่อนักเรียนในชุมนุมนี้
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    // วาดแต่ละแถว
+    clubRegs.forEach((reg, idx) => {
+        const row = document.createElement("tr");
+        const fullName = `${reg.prefix || ""}${reg.first_name} ${reg.last_name}`;
+        
+        let statusBadge = "";
+        if (reg.registration_status === 'verified') {
+            statusBadge = `<span class="ticket-status-badge verified" style="font-size:0.75rem; padding: 2px 8px; border-radius: 4px;">Verified (ยืนยันแล้ว)</span>`;
+        } else {
+            statusBadge = `<span class="ticket-status-badge pending" style="font-size:0.75rem; padding: 2px 8px; border-radius: 4px;">Pending (สำรองสิทธิ์)</span>`;
+        }
+
+        row.innerHTML = `
+            <td>${idx + 1}</td>
+            <td><strong>${reg.student_id || "นักเรียนใหม่"}</strong></td>
+            <td><strong>${fullName}</strong></td>
+            <td>${reg.level}</td>
+            <td>${statusBadge}</td>
+            <td>
+                <div style="display:flex; gap:6px; justify-content:center;">
+                    <button class="btn-small" onclick="editAdminStudent('${reg.id}')" style="background:rgba(56, 189, 248, 0.15); border:1px solid #38bdf8; color:#38bdf8; padding:4px 8px; border-radius:4px; font-size:0.75rem; display:flex; align-items:center; gap:2px; cursor:pointer;" title="แก้ไขข้อมูล">
+                        <i class="fa-solid fa-pen-to-square"></i>
+                    </button>
+                    <button class="btn-small-danger" onclick="deleteAdminStudent('${reg.id}', '${currentManagingClubId}')" style="padding:4px 8px; border-radius:4px; font-size:0.75rem; display:flex; align-items:center; gap:2px; cursor:pointer;" title="ลบรายชื่อ">
+                        <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                </div>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+// 4. ทริกเกอร์เรนเดอร์ตารางเมื่อพิมพ์ในช่องค้นหา
+function filterClubStudentsList() {
+    renderClubStudentsList();
+}
+
+// 5. เปิด/ปิด การแสดงฟอร์มพับเพิ่ม/แก้ไขนักเรียน
+function toggleAdminStudentForm() {
+    const container = document.getElementById("admin-student-form-container");
+    const toggleBtn = document.getElementById("admin-toggle-student-form-btn");
+    
+    if (container.style.display === "none") {
+        // เปิดฟอร์ม
+        container.style.display = "block";
+        toggleBtn.innerHTML = `<i class="fa-solid fa-chevron-up"></i> ซ่อนฟอร์มข้อมูลนักเรียน`;
+        
+        // เคลียร์ค่าหากไม่ใช่โหมดแก้ไข (ไม่มี reg-id ค้างไว้)
+        if (!document.getElementById("admin-reg-id").value) {
+            resetAdminStudentFormFields();
+            document.getElementById("admin-student-form-title").innerHTML = `<i class="fa-solid fa-user-plus"></i> เพิ่มนักเรียนใหม่ในชุมนุมนี้`;
+        }
+    } else {
+        // ปิดฟอร์ม
+        cancelAdminStudentForm();
+    }
+}
+
+// 6. ยกเลิกและซ่อนฟอร์มกลับไปพร้อมเคลียร์ฟิลด์
+function cancelAdminStudentForm() {
+    const container = document.getElementById("admin-student-form-container");
+    const toggleBtn = document.getElementById("admin-toggle-student-form-btn");
+    
+    container.style.display = "none";
+    toggleBtn.innerHTML = `<i class="fa-solid fa-user-plus"></i> เพิ่มนักเรียนใหม่ในชุมนุมนี้`;
+    
+    resetAdminStudentFormFields();
+}
+
+// 7. เคลียร์ค่าทั้งหมดภายในช่องกรอกข้อมูลนักเรียน
+function resetAdminStudentFormFields() {
+    document.getElementById("admin-reg-id").value = "";
+    document.getElementById("admin-reg-student-id").value = "";
+    document.getElementById("admin-reg-level").value = "";
+    document.getElementById("admin-reg-prefix").value = "";
+    document.getElementById("admin-reg-first-name").value = "";
+    document.getElementById("admin-reg-last-name").value = "";
+    document.getElementById("admin-reg-status").value = "verified"; // ค่าตั้งต้นคือยืนยันตัวตนเลย
+    
+    document.getElementById("admin-student-submit-btn").innerHTML = `<i class="fa-solid fa-save"></i> บันทึกข้อมูล`;
+}
+
+// 8. ดึงประวัตินักเรียนผ่านรหัสประจำตัวอัตโนมัติ (เมื่อพิมพ์เลขนักเรียน 5 หลัก)
+async function handleAdminStudentIdChange() {
+    const studentIdInput = document.getElementById("admin-reg-student-id");
+    if (!studentIdInput) return;
+    const studentId = studentIdInput.value.trim();
+    if (!studentId) return;
+
+    try {
+        const { data, error } = await supabaseClient
+            .from("students")
+            .select("*")
+            .eq("student_id", studentId)
+            .maybeSingle();
+
+        if (error) throw error;
+
+        if (data) {
+            // เติมฟอร์มโดยอัตโนมัติ
+            if (data.prefix) document.getElementById("admin-reg-prefix").value = data.prefix;
+            if (data.first_name) document.getElementById("admin-reg-first-name").value = data.first_name;
+            if (data.last_name) document.getElementById("admin-reg-last-name").value = data.last_name;
+            if (data.level) document.getElementById("admin-reg-level").value = data.level;
+            
+            showToast(`พบประวัตินักเรียน ${data.prefix || ""}${data.first_name} ${data.last_name} ในระบบล่วงหน้าแล้ว! กรอกข้อมูลอัตโนมัติเรียบร้อย`, "success");
+        }
+    } catch (e) {
+        console.error("Error auto-fetching student:", e);
+    }
+}
+
+// 9. เลือกนักเรียนมากรอกฟอร์มเพื่อแก้ไข
+function editAdminStudent(regId) {
+    const reg = state.registrations.find(r => r.id === regId);
+    if (!reg) return;
+
+    // เติมข้อมูลลงในช่องกรอก
+    document.getElementById("admin-reg-id").value = reg.id;
+    document.getElementById("admin-reg-student-id").value = reg.student_id || "";
+    document.getElementById("admin-reg-level").value = reg.level;
+    document.getElementById("admin-reg-prefix").value = reg.prefix || "";
+    document.getElementById("admin-reg-first-name").value = reg.first_name;
+    document.getElementById("admin-reg-last-name").value = reg.last_name;
+    document.getElementById("admin-reg-status").value = reg.registration_status;
+
+    // อัปเดต UI ฟอร์มและเปิดเลื่อนลงมา
+    document.getElementById("admin-student-form-title").innerHTML = `<i class="fa-solid fa-user-pen"></i> แก้ไขข้อมูลสมาชิกในชุมนุม`;
+    document.getElementById("admin-student-submit-btn").innerHTML = `<i class="fa-solid fa-floppy-disk"></i> บันทึกการแก้ไข`;
+
+    const container = document.getElementById("admin-student-form-container");
+    const toggleBtn = document.getElementById("admin-toggle-student-form-btn");
+    
+    container.style.display = "block";
+    toggleBtn.innerHTML = `<i class="fa-solid fa-chevron-up"></i> ซ่อนฟอร์มข้อมูลนักเรียน`;
+    
+    // โฟกัสไปที่ฟิลด์แรก
+    document.getElementById("admin-reg-student-id").focus();
+}
+
+// 10. บันทึกข้อมูลลงทะเบียนนักเรียน (เพิ่มใหม่ หรือ อัปเดต)
+async function saveAdminStudentRegistration() {
+    if (!supabaseClient || !currentManagingClubId) return;
+
+    const regId = document.getElementById("admin-reg-id").value;
+    const studentId = document.getElementById("admin-reg-student-id").value.trim();
+    const level = document.getElementById("admin-reg-level").value.trim();
+    const prefix = document.getElementById("admin-reg-prefix").value;
+    const firstName = document.getElementById("admin-reg-first-name").value.trim();
+    const lastName = document.getElementById("admin-reg-last-name").value.trim();
+    const status = document.getElementById("admin-reg-status").value;
+
+    // ตรวจสอบความถูกต้องขั้นพื้นฐาน
+    if (!firstName || !lastName || !level) {
+        showToast("กรุณากรอกชื่อจริง นามสกุล และระดับชั้นเรียนของนักเรียนให้ครบถ้วน", "warning");
+        return;
+    }
+
+    const club = state.clubs.find(c => c.id === currentManagingClubId);
+    if (!club) return;
+
+    const isEditMode = !!regId;
+
+    try {
+        const ipAddress = await getUserIpAddress();
+        const userAgent = navigator.userAgent || "Unknown Device";
+
+        // ตรวจสอบกรณีชื่อ-นามสกุลซ้ำกันในระบบทะเบียน (ไม่ให้ทับคนอื่น)
+        const isDuplicateName = state.registrations.some(r => 
+            r.first_name.toLowerCase() === firstName.toLowerCase() && 
+            r.last_name.toLowerCase() === lastName.toLowerCase() && 
+            r.id !== regId
+        );
+        if (isDuplicateName) {
+            showToast(`ขออภัย นักเรียนชื่อ "${firstName} ${lastName}" ได้ลงทะเบียนในระบบเรียบร้อยแล้ว ไม่สามารถลงซ้ำได้`, "error");
+            return;
+        }
+
+        // หากเป็นการเพิ่มใหม่ และชุมนุมเต็มแล้ว ให้แอดมินยืนยันอีกรอบ
+        if (!isEditMode) {
+            const currentTotalCount = state.registrations.filter(r => r.club_id === currentManagingClubId).length;
+            if (currentTotalCount >= club.capacity) {
+                if (!confirm(`⚠️ ขณะนี้ชุมนุมนี้เต็มแล้ว (${currentTotalCount}/${club.capacity} คน) คุณแน่ใจใช่หรือไม่ว่าต้องการเพิ่มนักเรียนคนนี้เป็นกรณีพิเศษ (Over-capacity)?`)) {
+                    return;
+                }
+            }
+        }
+
+        const submitBtn = document.getElementById("admin-student-submit-btn");
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = `<div class="spinner"></div> กำลังบันทึก...`;
+
+        if (isEditMode) {
+            // โหมดแก้ไข
+            const { error: updateErr } = await supabaseClient
+                .from("registrations")
+                .update({
+                    student_id: studentId || null,
+                    prefix: prefix || null,
+                    first_name: firstName,
+                    last_name: lastName,
+                    level: level,
+                    registration_status: status
+                })
+                .eq("id", regId);
+
+            if (updateErr) throw updateErr;
+
+            // บันทึกประวัติ Audit Log
+            await supabaseClient.from("audit_logs").insert({
+                student_id: studentId || null,
+                student_name: `${prefix || ""}${firstName} ${lastName}`,
+                action: "SETTINGS_UPDATED",
+                club_name: club.name,
+                ip_address: ipAddress,
+                user_agent: userAgent,
+                details: `ผู้ดูแลระบบแก้ไขข้อมูลทะเบียนนักเรียนโดยตรง (รหัสนักเรียน: ${studentId || 'ไม่มี'}, ชั้น: ${level}, สถานะ: ${status})`
+            });
+
+            showToast("แก้ไขข้อมูลนักเรียนในทะเบียนสำเร็จแล้ว", "success");
+        } else {
+            // โหมดเพิ่มใหม่
+            const { error: insertErr } = await supabaseClient
+                .from("registrations")
+                .insert([{
+                    club_id: currentManagingClubId,
+                    student_id: studentId || null,
+                    prefix: prefix || null,
+                    first_name: firstName,
+                    last_name: lastName,
+                    level: level,
+                    registration_status: status
+                }]);
+
+            if (insertErr) throw insertErr;
+
+            // ปรับปรุงยอดตัวเลขนับจำนวนผู้ลงสมัครในชุมนุม +1
+            const newEnrolled = club.enrolled_count + 1;
+            await supabaseClient
+                .from("clubs")
+                .update({ enrolled_count: newEnrolled })
+                .eq("id", currentManagingClubId);
+
+            // บันทึกประวัติ Audit Log
+            await supabaseClient.from("audit_logs").insert({
+                student_id: studentId || null,
+                student_name: `${prefix || ""}${firstName} ${lastName}`,
+                action: "REGISTER_SUCCESS",
+                club_name: club.name,
+                ip_address: ipAddress,
+                user_agent: userAgent,
+                details: `ผู้ดูแลระบบทำการเพิ่มและลงทะเบียนนักเรียนเข้าสู่ชุมนุมโดยตรง (รหัสนักเรียน: ${studentId || 'ไม่มี'}, ชั้น: ${level}, สถานะ: ${status})`
+            });
+
+            showToast(`เพิ่มนักเรียนเข้าสู่ชุมนุม "${club.name}" เรียบร้อยแล้ว`, "success");
+        }
+
+        // คืนค่าปุ่ม
+        submitBtn.disabled = false;
+
+        // อัปเดตข้อมูล State และ UI
+        await loadClubsData();
+        await loadAdminDashboardData();
+        
+        // รีเฟรชหัวข้อย่อยโควตาชุมนุมของ Modal
+        const clubRegs = state.registrations.filter(r => r.club_id === currentManagingClubId);
+        const verifiedCount = clubRegs.filter(r => r.registration_status === 'verified').length;
+        const pendingCount = clubRegs.filter(r => r.registration_status === 'pending').length;
+        const targetClub = state.clubs.find(c => c.id === currentManagingClubId);
+        if (targetClub) {
+            document.getElementById("admin-club-students-subtitle").innerText = `ครูผู้ดูแล: ${targetClub.teacher} | สถานที่: ${targetClub.location} | โควตา: ${clubRegs.length}/${targetClub.capacity} คน (ยืนยันสิทธิ์แล้ว: ${verifiedCount} คน, สำรองเด็กใหม่: ${pendingCount} คน)`;
+        }
+
+        cancelAdminStudentForm();
+        renderClubStudentsList();
+
+    } catch (e) {
+        console.error("Error saving student registration:", e);
+        showToast("เกิดข้อผิดพลาดในการบันทึกข้อมูล กรุณาตรวจสอบสิทธิ์และค่าที่ระบุอีกครั้ง", "error");
+        document.getElementById("admin-student-submit-btn").disabled = false;
+        if (isEditMode) {
+            document.getElementById("admin-student-submit-btn").innerHTML = `<i class="fa-solid fa-floppy-disk"></i> บันทึกการแก้ไข`;
+        } else {
+            document.getElementById("admin-student-submit-btn").innerHTML = `<i class="fa-solid fa-save"></i> บันทึกข้อมูล`;
+        }
+    }
+}
+
+// 11. ลบประวัตินักเรียนและคืนโควตาชุมนุม
+async function deleteAdminStudent(regId, clubId) {
+    if (!supabaseClient) return;
+
+    const reg = state.registrations.find(r => r.id === regId);
+    if (!reg) return;
+
+    const fullName = `${reg.prefix || ""}${reg.first_name} ${reg.last_name}`;
+
+    if (!confirm(`คุณแน่ใจใช่หรือไม่ว่าต้องการลบสิทธิ์ของ "${fullName}" ออกจากทะเบียนชุมนุมนี้?\n(การดำเนินการนี้จะลบข้อมูลออกถาวรและคืนที่นั่ง 1 ที่กลับสู่ระบบทันที!)`)) {
+        return;
+    }
+
+    try {
+        const ipAddress = await getUserIpAddress();
+        const userAgent = navigator.userAgent || "Unknown Device";
+        const club = state.clubs.find(c => c.id === clubId);
+
+        // 1. ลบจากทะเบียน
+        const { error: delErr } = await supabaseClient
+            .from("registrations")
+            .delete()
+            .eq("id", regId);
+
+        if (delErr) throw delErr;
+
+        // 2. คืนที่นั่ง ( decrement_club_seats RPC หรือ อัปเดต enrolled_count Direct)
+        const { error: errUp } = await supabaseClient
+            .rpc("decrement_club_seats", { p_club_id: clubId });
+            
+        if (errUp && club) {
+            // fallback หาก RPC ไม่มีตัวตน
+            const newEnrolled = Math.max(0, club.enrolled_count - 1);
+            await supabaseClient
+                .from("clubs")
+                .update({ enrolled_count: newEnrolled })
+                .eq("id", clubId);
+        }
+
+        // 3. เขียนประวัติ Audit Log
+        await supabaseClient.from("audit_logs").insert({
+            student_id: reg.student_id || null,
+            student_name: fullName,
+            action: "REGISTRATION_DELETED",
+            club_name: club ? club.name : "ไม่ทราบชุมนุม",
+            ip_address: ipAddress,
+            user_agent: userAgent,
+            details: `ผู้ดูแลระบบลบชื่อนักเรียนออกจากบัญชีรายชื่อของชุมนุมโดยตรง`
+        });
+
+        showToast(`ลบสิทธิ์นักเรียน "${fullName}" และคืนที่นั่งเรียบร้อยแล้ว`, "info");
+
+        // อัปเดตข้อมูล State และ UI
+        await loadClubsData();
+        await loadAdminDashboardData();
+
+        // รีเฟรชหัวข้อย่อยโควตาชุมนุมของ Modal
+        const clubRegs = state.registrations.filter(r => r.club_id === currentManagingClubId);
+        const verifiedCount = clubRegs.filter(r => r.registration_status === 'verified').length;
+        const pendingCount = clubRegs.filter(r => r.registration_status === 'pending').length;
+        const targetClub = state.clubs.find(c => c.id === currentManagingClubId);
+        if (targetClub) {
+            document.getElementById("admin-club-students-subtitle").innerText = `ครูผู้ดูแล: ${targetClub.teacher} | สถานที่: ${targetClub.location} | โควตา: ${clubRegs.length}/${targetClub.capacity} คน (ยืนยันสิทธิ์แล้ว: ${verifiedCount} คน, สำรองเด็กใหม่: ${pendingCount} คน)`;
+        }
+
+        renderClubStudentsList();
+
+    } catch (e) {
+        console.error("Error deleting student from club:", e);
+        showToast("เกิดข้อผิดพลาดในการลบรายการนักเรียน", "error");
+    }
+}
+
+// ผูกฟังก์ชันใหม่กับ window scope
+window.openAdminClubStudentsModal = openAdminClubStudentsModal;
+window.closeAdminClubStudentsModal = closeAdminClubStudentsModal;
+window.renderClubStudentsList = renderClubStudentsList;
+window.filterClubStudentsList = filterClubStudentsList;
+window.toggleAdminStudentForm = toggleAdminStudentForm;
+window.cancelAdminStudentForm = cancelAdminStudentForm;
+window.handleAdminStudentIdChange = handleAdminStudentIdChange;
+window.editAdminStudent = editAdminStudent;
+window.saveAdminStudentRegistration = saveAdminStudentRegistration;
+window.deleteAdminStudent = deleteAdminStudent;
+
