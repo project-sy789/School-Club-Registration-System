@@ -192,46 +192,85 @@ function updateFavicon(base64Data) {
 
 // ฟังก์ชันนับถอยหลังและอัปเดตสถานะของระบบเปิด-ปิดรับสมัคร
 function startCountdownTimer() {
+    let prevRegState = null;
+
     setInterval(() => {
         const period = state.settings.registration_period || {};
         const isActive = period.is_active;
         
+        let currentRegState = "closed";
+        let badgeLabel = "ปิดรับสมัคร (ควบคุมโดยผู้ดูแลระบบ)";
+        let showTimer = false;
+        let timerLabel = "";
+        let timerVal = "";
+
         if (!isActive) {
-            updateStatusBadge("closed", "ปิดรับสมัคร (ควบคุมโดยผู้ดูแลระบบ)");
-            document.getElementById("countdown-container").style.display = "none";
-            return;
-        }
-
-        const now = new Date();
-        const startTime = period.start_time ? new Date(period.start_time) : null;
-        const endTime = period.end_time ? new Date(period.end_time) : null;
-
-        // เช็คช่วงเวลา
-        if (startTime && now < startTime) {
-            // ยังไม่เปิดรับสมัคร -> แสดงเวลานับถอยหลัง
-            updateStatusBadge("pending-time", "กำลังจะเปิดระบบในเร็วๆ นี้");
-            document.getElementById("countdown-container").style.display = "flex";
-            document.getElementById("countdown-label").innerText = "ระบบจะเปิดในอีก:";
-            
-            const diff = startTime - now;
-            document.getElementById("countdown-timer-val").innerText = formatTimeDiff(diff);
-        } else if (endTime && now > endTime) {
-            // หมดเขตลงทะเบียนแล้ว
-            updateStatusBadge("closed", "ปิดรับสมัคร (หมดเวลารับสมัคร)");
-            document.getElementById("countdown-container").style.display = "none";
+            currentRegState = "closed";
+            badgeLabel = "ปิดรับสมัคร (ควบคุมโดยผู้ดูแลระบบ)";
         } else {
-            // อยู่ในวันเปิดรับสมัครจริง
-            updateStatusBadge("open", "กำลังเปิดรับสมัครนักเรียน");
-            
-            if (endTime) {
-                document.getElementById("countdown-container").style.display = "flex";
-                document.getElementById("countdown-label").innerText = "จะปิดระบบในอีก:";
-                const diff = endTime - now;
-                document.getElementById("countdown-timer-val").innerText = formatTimeDiff(diff);
+            const now = new Date();
+            const startTime = period.start_time ? new Date(period.start_time) : null;
+            const endTime = period.end_time ? new Date(period.end_time) : null;
+
+            if (startTime && now < startTime) {
+                // ยังไม่เปิดรับสมัคร -> แสดงเวลานับถอยหลัง
+                currentRegState = "pending-time";
+                badgeLabel = "กำลังจะเปิดระบบในเร็วๆ นี้";
+                showTimer = true;
+                timerLabel = "ระบบจะเปิดในอีก:";
+                
+                const diff = startTime - now;
+                timerVal = formatTimeDiff(diff);
+            } else if (endTime && now > endTime) {
+                // หมดเขตลงทะเบียนแล้ว
+                currentRegState = "closed";
+                badgeLabel = "ปิดรับสมัคร (หมดเวลารับสมัคร)";
             } else {
-                document.getElementById("countdown-container").style.display = "none";
+                // อยู่ในวันเปิดรับสมัครจริง
+                currentRegState = "open";
+                badgeLabel = "กำลังเปิดรับสมัครนักเรียน";
+                
+                if (endTime) {
+                    showTimer = true;
+                    timerLabel = "จะปิดระบบในอีก:";
+                    const diff = endTime - now;
+                    timerVal = formatTimeDiff(diff);
+                }
             }
         }
+
+        // 1. อัปเดตตราสถานะ (Badge)
+        updateStatusBadge(currentRegState, badgeLabel);
+
+        // 2. อัปเดตส่วนแสดงเวลานับถอยหลัง
+        const container = document.getElementById("countdown-container");
+        if (container) {
+            if (showTimer) {
+                container.style.display = "flex";
+                const labelEl = document.getElementById("countdown-label");
+                const valEl = document.getElementById("countdown-timer-val");
+                if (labelEl) labelEl.innerText = timerLabel;
+                if (valEl) valEl.innerText = timerVal;
+            } else {
+                container.style.display = "none";
+            }
+        }
+
+        // 3. หากมีการเปลี่ยนสถานะของระบบรับสมัคร (เช่น จาก pending-time -> open หรือ open -> closed)
+        // ให้ทำการเรนเดอร์รายชื่อชุมนุมใหม่โดยอัตโนมัติ เพื่อปรับปรุงปุ่มลงทะเบียนโดยไม่ต้องรีเฟรชหน้า
+        if (prevRegState !== null && prevRegState !== currentRegState) {
+            console.log(`[Countdown] System registration state transitioned from "${prevRegState}" to "${currentRegState}". Re-rendering clubs grid...`);
+            renderClubsGrid();
+            
+            if (currentRegState === "open") {
+                showToast("⏰ ขณะนี้ระบบได้เปิดให้ลงทะเบียนเข้าชุมนุมเรียบร้อยแล้ว!", "success");
+            } else if (currentRegState === "closed") {
+                showToast("⏰ ระบบปิดรับสมัครลงทะเบียนชุมนุมแล้ว", "info");
+            }
+        }
+
+        // บันทึกสถานะปัจจุบันไว้เพื่อเปรียบเทียบในวินาทีถัดไป
+        prevRegState = currentRegState;
     }, 1000);
 }
 
