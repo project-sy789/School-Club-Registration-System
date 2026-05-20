@@ -948,43 +948,6 @@
         </div>
     </div>
 
-    <!-- 🛠️ 4. Setup Screen overlay (แสดงเฉพาะตอนเปิดใช้ครั้งแรกและยังไม่มีค่า Supabase credentials) -->
-    <div class="setup-overlay" id="setup-screen-overlay">
-        <div class="setup-card glass-container text-center">
-            <div class="setup-logo">
-                <i class="fa-solid fa-gears"></i>
-            </div>
-            <h2>การตั้งค่าใช้งานครั้งแรก (First-Time Setup)</h2>
-            <p>ยินดีต้อนรับสู่ระบบสำเร็จรูป! กรุณาระบุรหัส API ของโครงการ Supabase ของคุณเพื่อเชื่อมต่อฐานข้อมูลและทำงานได้สมบูรณ์ในทันที</p>
-            
-            <div class="modal-form" style="text-align: left;">
-                <div class="input-group">
-                    <label for="setup-supabase-url">Supabase URL</label>
-                    <input type="text" id="setup-supabase-url" placeholder="https://xxxxxx.supabase.co">
-                </div>
-                
-                <div class="input-group">
-                    <label for="setup-supabase-key">Supabase Anon Public API Key</label>
-                    <input type="password" id="setup-supabase-key" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...">
-                </div>
-
-                <div class="setup-instruction-box">
-                    <strong>วิธีการรับค่า API ในโครงการ Supabase:</strong>
-                    <ol>
-                        <li>เปิดหน้า Dashboard ของ Supabase แล้วกดสร้าง Project ใหม่</li>
-                        <li>เข้าไปที่เมนู <strong>Settings</strong> > <strong>API</strong></li>
-                        <li>คัดลอกค่า <strong>Project URL</strong> และ <strong>anon (public) Key</strong> มาใส่ในช่องด้านบน</li>
-                        <li>กดปุ่มบันทึก ระบบจะจำค่าเชื่อมต่อไว้ในบราวเซอร์นี้โดยอัตโนมัติ!</li>
-                    </ol>
-                </div>
-
-                <button class="btn-primary" style="width: 100%; justify-content: center; height: 48px; font-size: 1.05rem;" onclick="saveSetupCredentials()">
-                    <i class="fa-solid fa-circle-check"></i> บันทึกค่าเชื่อมต่อและเข้าสู่เว็บ
-                </button>
-            </div>
-        </div>
-    </div>
-
     <!-- 📊 5. Toast Notification Layer -->
     <div class="toast-notification" id="toast-notify">
         <i class="fa-solid fa-circle-info" id="toast-icon"></i>

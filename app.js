@@ -74,31 +74,15 @@ async function getUserIpAddress() {
 // 🔑 1. SUPABASE CLIENT SET-UP & INITIALIZATION
 // =====================================================================
 function initSupabaseConnection() {
-    let url = "";
-    let key = "";
-
-    // 1. ตรวจสอบจากไฟล์ config.js
-    if (typeof SUPABASE_CONFIG !== 'undefined' && SUPABASE_CONFIG.SUPABASE_URL && SUPABASE_CONFIG.SUPABASE_ANON_KEY) {
-        url = SUPABASE_CONFIG.SUPABASE_URL;
-        key = SUPABASE_CONFIG.SUPABASE_ANON_KEY;
-    } 
-    // 2. ถ้าในไฟล์ config ว่าง ตรวจสอบจาก LocalStorage
-    else {
-        url = localStorage.getItem("custom_supabase_url");
-        key = localStorage.getItem("custom_supabase_key");
-    }
-
-    // 3. หากยังไม่มีสิทธิ์ ให้แสดงหน้าจอตั้งค่าตัวเชื่อมต่อ
-    if (!url || !key) {
-        document.getElementById("setup-screen-overlay").classList.add("active");
+    // ดึงค่าการเชื่อมต่อจากไฟล์ config.js เท่านั้น (หรือฝังผ่าน GitHub Secrets/Actions)
+    if (typeof SUPABASE_CONFIG === 'undefined' || !SUPABASE_CONFIG.SUPABASE_URL || !SUPABASE_CONFIG.SUPABASE_ANON_KEY) {
+        showFatalConfigError();
         return;
     }
 
     try {
-        // เริ่มต้นการเชื่อมต่อ
-        supabaseClient = supabase.createClient(url, key);
-        document.getElementById("setup-screen-overlay").classList.remove("active");
-        
+        supabaseClient = supabase.createClient(SUPABASE_CONFIG.SUPABASE_URL, SUPABASE_CONFIG.SUPABASE_ANON_KEY);
+
         // โหลดข้อมูลตั้งค่าระบบก่อน แล้วค่อยโหลดรายชื่อชุมนุม
         loadSystemSettings().then(() => {
             loadClubsData();
@@ -106,28 +90,29 @@ function initSupabaseConnection() {
             populateRegistrationLevelDropdown();
         });
     } catch (e) {
-        showToast("ไม่สามารถสร้างการเชื่อมต่อไปยัง Supabase ได้ กรุณาตรวจสอบตัวแปรของคุณ", "error");
-        document.getElementById("setup-screen-overlay").classList.add("active");
+        console.error("Supabase init failed:", e);
+        showFatalConfigError();
     }
 }
 
-// บันทึกค่าเชื่อมต่อที่ระบุเอง
-function saveSetupCredentials() {
-    const url = document.getElementById("setup-supabase-url").value.trim();
-    const key = document.getElementById("setup-supabase-key").value.trim();
-
-    if (!url || !key) {
-        showToast("กรุณากรอกข้อมูลให้ครบทุกช่อง", "error");
-        return;
-    }
-
-    localStorage.setItem("custom_supabase_url", url);
-    localStorage.setItem("custom_supabase_key", key);
-    
-    showToast("บันทึกข้อมูลการเชื่อมต่อสำเร็จ ระบบกำลังรีสตาร์ต...", "success");
-    setTimeout(() => {
-        window.location.reload();
-    }, 1000);
+// แสดงข้อความผิดพลาดเมื่อยังไม่ได้ตั้งค่า Supabase ใน config.js
+function showFatalConfigError() {
+    const msg = "ยังไม่ได้ตั้งค่า Supabase URL และ Anon Key ในไฟล์ config.js — กรุณาแก้ไขไฟล์ config.js ตามคำแนะนำใน README แล้ว Deploy ใหม่อีกครั้ง";
+    console.error("[CONFIG MISSING]", msg);
+    document.body.innerHTML = `
+        <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem; background: #07170f; color: #e6f1eb; font-family: -apple-system, system-ui, sans-serif;">
+            <div style="max-width: 560px; padding: 2.5rem; background: rgba(13, 40, 26, 0.95); border: 1px solid rgba(52, 211, 153, 0.25); border-radius: 16px; box-shadow: 0 10px 40px rgba(0,0,0,0.4);">
+                <div style="font-size: 3rem; color: #fca5a5; margin-bottom: 1rem; text-align: center;">⚠️</div>
+                <h2 style="font-size: 1.4rem; font-weight: 800; margin: 0 0 1rem; color: #34d399; text-align: center;">ระบบยังไม่ได้ตั้งค่า Supabase</h2>
+                <p style="font-size: 0.95rem; line-height: 1.6; color: #b3c8be; margin: 0 0 1.25rem; text-align: center;">
+                    กรุณาเปิดไฟล์ <code style="background: rgba(255,255,255,0.08); padding: 2px 8px; border-radius: 4px; color: #34d399;">config.js</code> แล้วใส่ค่า <strong>Supabase URL</strong> และ <strong>Anon Key</strong> ตามคู่มือใน <a href="https://github.com/project-sy789/School-Club-Registration-System#readme" target="_blank" style="color: #34d399; text-decoration: underline;">README</a>
+                </p>
+                <div style="background: rgba(7, 23, 15, 0.6); padding: 1rem; border-radius: 8px; font-size: 0.82rem; color: #94a3a0; border-left: 3px solid #34d399;">
+                    หากเป็นผู้ใช้งานทั่วไป (ไม่ใช่ผู้ดูแลระบบ) กรุณาแจ้งครูผู้ดูแลให้ตรวจสอบการตั้งค่าระบบ
+                </div>
+            </div>
+        </div>
+    `;
 }
 
 // =====================================================================
