@@ -179,9 +179,16 @@ BEGIN
     END IF;
 
     -- 2.2 ตรวจสอบกรณีชื่อและนามสกุล (ป้องกันสมัครซ้ำด้วยชื่อ)
+    -- จะถือว่าซ้ำก็ต่อเมื่อชื่อ-นามสกุลตรงกัน และ (มีฝ่ายใดฝ่ายหนึ่งไม่มีรหัสประจำตัว หรือทั้งสองฝ่ายมีรหัสประจำตัวตรงกัน)
     SELECT EXISTS (
         SELECT 1 FROM registrations 
-        WHERE TRIM(first_name) = TRIM(p_first_name) AND TRIM(last_name) = TRIM(p_last_name)
+        WHERE TRIM(first_name) = TRIM(p_first_name) 
+          AND TRIM(last_name) = TRIM(p_last_name)
+          AND (
+              student_id IS NULL 
+              OR v_student_id_cleaned IS NULL 
+              OR student_id = v_student_id_cleaned
+          )
     ) INTO v_already_registered;
 
     IF v_already_registered THEN
