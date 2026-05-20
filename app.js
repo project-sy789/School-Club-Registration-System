@@ -9,6 +9,7 @@ let state = {
     clubs: [],
     students: [],
     registrations: [],
+    auditLogs: [], // เก็บประวัติความปลอดภัยระบบ
     settings: {
         school_config: { school_name: "ระบบลงทะเบียนชุมนุม", semester: "1/2569", admin_password: "admin" },
         registration_period: { is_active: true, start_time: "", end_time: "" }
@@ -30,6 +31,24 @@ document.addEventListener("DOMContentLoaded", () => {
 
     initSupabaseConnection();
 });
+
+// 🌐 ดึงข้อมูล IP Address สาธารณะของนักเรียนแบบ Non-blocking (พร้อม Timeout)
+async function getUserIpAddress() {
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000); // ตั้งหมดเวลา 2 วินาที
+        
+        const response = await fetch('https://api.ipify.org?format=json', { signal: controller.signal });
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) throw new Error('Response not OK');
+        const data = await response.json();
+        return data.ip || 'Unknown IP';
+    } catch (e) {
+        console.warn("Failed to fetch public IP, using fallback.", e);
+        return 'Unknown IP';
+    }
+}
 
 // =====================================================================
 // 🔑 1. SUPABASE CLIENT SET-UP & INITIALIZATION
@@ -578,13 +597,19 @@ async function submitStudentRegistration() {
     
     setTimeout(async () => {
         try {
+            // ดึง IP Address และอุปกรณ์ของนักเรียน ณ วินาทีสมัคร
+            const ipAddress = await getUserIpAddress();
+            const userAgent = navigator.userAgent || "Unknown Device";
+
             // 4. สั่งเรียก RPC Function register_student_atomic บนฐานข้อมูล Supabase เพื่อตัดที่นั่งแบบปลอดภัย (Row level lock)
             const { data, error } = await supabaseClient.rpc("register_student_atomic", {
                 p_club_id: state.currentClub.id,
                 p_student_id: studentId,
                 p_first_name: firstName,
                 p_last_name: lastName,
-                p_level: level
+                p_level: level,
+                p_ip_address: ipAddress,
+                p_user_agent: userAgent
             });
 
             if (error) throw error;
@@ -927,6 +952,8 @@ async function loadAdminDashboardData() {
             loadStudentsList();
         } else if (state.activeAdminSubTab === 'settings') {
             renderAdminSettings();
+        } else if (state.activeAdminSubTab === 'logs') {
+            loadAdminLogs();
         }
     } catch (e) {
         console.error("Error loading admin dashboard data:", e);
@@ -1045,6 +1072,11 @@ async function approvePendingRegistration(regId) {
     }
 
     try {
+        const reg = state.registrations.find(r => r.id === regId);
+        const studentName = reg ? `${reg.first_name} ${reg.last_name}` : "ไม่ทราบชื่อ";
+        const clubName = reg && reg.clubs ? reg.clubs.name : "ไม่ทราบชุมนุม";
+        const oldStudentId = reg ? reg.student_id : null;
+
         const { data, error } = await supabaseClient
             .from("registrations")
             .update({
@@ -1055,6 +1087,18 @@ async function approvePendingRegistration(regId) {
             .select();
 
         if (error) throw error;
+
+        // บันทึกประวัติความปลอดภัย (Audit Log)
+        const ipAddress = await getUserIpAddress();
+        await supabaseClient.from("audit_logs").insert({
+            student_id: stdIdVal,
+            student_name: studentName,
+            action: "PENDING_APPROVED",
+            club_name: clubName,
+            ip_address: ipAddress,
+            user_agent: navigator.userAgent || "Unknown Device",
+            details: `ผู้ดูแลระบบอนุมัติยืนยันสิทธิ์ของเด็กใหม่ (เลขประจำตัวเดิม: ${oldStudentId || 'ไม่มี'} -> ใหม่: ${stdIdVal})`
+        });
 
         showToast("ยืนยันคุณสมบัติการเลือกเรียนชุมนุมของนักเรียนสำเร็จแล้ว", "success");
         loadAdminDashboardData();
@@ -1070,6 +1114,12 @@ async function cancelPendingRegistration(regId, clubId) {
     if (!confirm("คุณแน่ใจใช่หรือไม่ว่าต้องการยกเลิกและทำลายคำร้องจองสิทธิ์ของนักเรียนคนนี้? (ระบบจะคืนที่นั่งกลับชุมนุมทันที)")) return;
 
     try {
+        const reg = state.registrations.find(r => r.id === regId);
+        const studentName = reg ? `${reg.first_name} ${reg.last_name}` : "ไม่ทราบชื่อ";
+        const clubName = reg && reg.clubs ? reg.clubs.name : "ไม่ทราบชุมนุม";
+        const studentId = reg ? reg.student_id : null;
+        const status = reg ? reg.registration_status : "pending";
+
         // 1. ลบประวัติการสมัครในทะเบียน
         const { error: errDel } = await supabaseClient
             .from("registrations")
@@ -1094,6 +1144,18 @@ async function cancelPendingRegistration(regId, clubId) {
                     .eq("id", clubId);
             }
         }
+
+        // บันทึกประวัติความปลอดภัย (Audit Log)
+        const ipAddress = await getUserIpAddress();
+        await supabaseClient.from("audit_logs").insert({
+            student_id: studentId,
+            student_name: studentName,
+            action: status === "verified" ? "REGISTRATION_DELETED" : "PENDING_REJECTED",
+            club_name: clubName,
+            ip_address: ipAddress,
+            user_agent: navigator.userAgent || "Unknown Device",
+            details: `ผู้ดูแลระบบทำการยกเลิกสิทธิ์และลบรายชื่อนักเรียนออกจากชุมนุม (สถานะเดิม: ${status})`
+        });
 
         showToast("ยกเลิกและคืนโควตาชุมนุมเสร็จสิ้นแล้ว", "info");
         
@@ -1671,6 +1733,19 @@ async function saveSystemSettings() {
 
         showToast("บันทึกการปรับแต่งตั้งค่าโครงสร้างระบบเรียบร้อยแล้ว", "success");
         
+        // บันทึกประวัติความปลอดภัย (Audit Log)
+        try {
+            const ipAddress = await getUserIpAddress();
+            await supabaseClient.from("audit_logs").insert({
+                action: "SETTINGS_UPDATED",
+                ip_address: ipAddress,
+                user_agent: navigator.userAgent || "Unknown Device",
+                details: `ผู้ดูแลระบบแก้ไขการตั้งค่าระบบ: ชื่อโรงเรียน="${schoolName}", ภาคเรียน="${semester}", สถานะเปิดรับสมัคร=${is_active ? 'เปิด' : 'ปิด'}`
+            });
+        } catch (logErr) {
+            console.error("Failed to write settings audit log:", logErr);
+        }
+
         // อัปโหลดข้อมูลสถานะเก็บเข้าตัวแปรหลัก
         state.settings.school_config = payloadConfig;
         state.settings.registration_period = payloadPeriod;
@@ -1776,4 +1851,161 @@ function showToast(message, type = "info") {
     setTimeout(() => {
         toast.classList.remove("active");
     }, 3500);
+}
+
+// =====================================================================
+// 🔒 10. AUDIT LOGS SECURITY AND MONITORING SYSTEM
+// =====================================================================
+
+// โหลดข้อมูลล็อกประวัติความปลอดภัยจากฐานข้อมูล Supabase
+async function loadAdminLogs() {
+    if (!supabaseClient || !state.isAdminLoggedIn) return;
+
+    const tbody = document.getElementById("admin-logs-tbody");
+    tbody.innerHTML = `
+        <tr>
+            <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 3rem 0;">
+                <i class="fa-solid fa-circle-notch fa-spin" style="font-size: 2rem; color: var(--accent-mint); margin-bottom: 1rem;"></i>
+                <div style="font-size: 0.95rem;">กำลังดึงประวัติความปลอดภัยระบบ...</div>
+            </td>
+        </tr>
+    `;
+
+    try {
+        const { data, error } = await supabaseClient
+            .from("audit_logs")
+            .select("*")
+            .order("created_at", { ascending: false });
+
+        if (error) throw error;
+
+        state.auditLogs = data || [];
+        renderAdminLogs();
+    } catch (e) {
+        console.error("Error loading audit logs:", e);
+        showToast("ไม่สามารถเรียกข้อมูลประวัติความปลอดภัยได้", "error");
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="6" style="text-align: center; color: #ef4444; padding: 3rem 0;">
+                    <i class="fa-solid fa-triangle-exclamation" style="font-size: 2.5rem; margin-bottom: 1rem;"></i>
+                    <div style="font-weight: bold;">เกิดข้อผิดพลาดในการโหลดข้อมูล</div>
+                    <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 5px;">${e.message || e}</div>
+                </td>
+            </tr>
+        `;
+    }
+}
+
+// เรนเดอร์ตารางล็อกความปลอดภัยระบบลงหน้าแอดมิน
+function renderAdminLogs(logs = state.auditLogs) {
+    const tbody = document.getElementById("admin-logs-tbody");
+    tbody.innerHTML = "";
+
+    if (logs.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 3rem 0;">
+                    <i class="fa-regular fa-folder-open" style="font-size: 2.5rem; color: var(--text-secondary); margin-bottom: 1rem;"></i>
+                    <div style="font-size: 0.95rem;">ไม่พบรายการประวัติประวัติความปลอดภัยตามเงื่อนไขที่เลือก</div>
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    logs.forEach(log => {
+        const tr = document.createElement("tr");
+        
+        // 1. วัน-เวลา
+        let dateStr = "-";
+        if (log.created_at) {
+            dateStr = new Date(log.created_at).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" });
+        }
+
+        // 2. กิจกรรม (badge)
+        let badgeHtml = "";
+        if (log.action === "REGISTER_SUCCESS") {
+            badgeHtml = `<span class="ticket-status-badge" style="background: rgba(16, 185, 129, 0.15); color: var(--accent-mint); border: 1px solid rgba(16, 185, 129, 0.3);">ลงทะเบียนสำเร็จ</span>`;
+        } else if (log.action === "REGISTER_PENDING") {
+            badgeHtml = `<span class="ticket-status-badge" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.3);">ลงสำรอง (เด็กใหม่)</span>`;
+        } else if (log.action === "PENDING_APPROVED") {
+            badgeHtml = `<span class="ticket-status-badge" style="background: rgba(52, 211, 153, 0.15); color: #34d399; border: 1px solid rgba(52, 211, 153, 0.3);">ครูอนุมัติสิทธิ์</span>`;
+        } else if (log.action === "PENDING_REJECTED") {
+            badgeHtml = `<span class="ticket-status-badge" style="background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3);">ครูปฏิเสธสิทธิ์</span>`;
+        } else if (log.action === "REGISTRATION_DELETED") {
+            badgeHtml = `<span class="ticket-status-badge" style="background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3);">ยกเลิก/ลบประวัติ</span>`;
+        } else if (log.action === "SETTINGS_UPDATED") {
+            badgeHtml = `<span class="ticket-status-badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3);">ครูแก้ไขระบบ</span>`;
+        } else {
+            badgeHtml = `<span class="ticket-status-badge" style="background: rgba(156, 163, 175, 0.15); color: #9ca3af; border: 1px solid rgba(156, 163, 175, 0.3);">${log.action}</span>`;
+        }
+
+        // 3. นักเรียน
+        const studentStr = log.student_name 
+            ? `<strong>${log.student_name}</strong><br><span style="font-size: 0.8rem; color: var(--text-secondary);">เลขประจําตัว: ${log.student_id || '-'}</span>`
+            : `<span style="color: var(--text-secondary);">-</span>`;
+
+        // 4. ชุมนุม
+        const clubStr = log.club_name ? `<strong>${log.club_name}</strong>` : `<span style="color: var(--text-secondary);">-</span>`;
+
+        // 5. IP Address
+        const ipStr = log.ip_address ? `<code style="background: rgba(255, 255, 255, 0.05); padding: 2px 6px; border-radius: 4px; font-family: monospace; color: var(--accent-mint);">${log.ip_address}</code>` : `<span style="color: var(--text-secondary);">-</span>`;
+
+        // 6. รายละเอียด / อุปกรณ์
+        const detailsStr = `
+            <div style="font-size: 0.9rem; line-height: 1.4; color: var(--text-primary);">${log.details || '-'}</div>
+            <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 4px; display: flex; align-items: center; gap: 4px;">
+                <i class="fa-solid fa-laptop-code"></i> ${log.user_agent || 'Unknown'}
+            </div>
+        `;
+
+        tr.innerHTML = `
+            <td>${dateStr}</td>
+            <td>${badgeHtml}</td>
+            <td>${studentStr}</td>
+            <td>${clubStr}</td>
+            <td>${ipStr}</td>
+            <td>${detailsStr}</td>
+        `;
+
+        tbody.appendChild(tr);
+    });
+}
+
+// คัดกรองข้อมูลประวัติความปลอดภัยด้วยคำค้นหาและกิจกรรม
+function filterAdminLogs() {
+    const searchVal = document.getElementById("admin-log-search-input").value.trim().toLowerCase();
+    const actionVal = document.getElementById("admin-log-action-filter").value;
+
+    let filtered = state.auditLogs;
+
+    // 1. คัดกรองตามประเภทกิจกรรม
+    if (actionVal) {
+        filtered = filtered.filter(log => log.action === actionVal);
+    }
+
+    // 2. คัดกรองตามคำค้นหา (รหัสประจำตัว, ชื่อนักเรียน, ชื่อชุมนุม, รายละเอียด หรือ IP)
+    if (searchVal) {
+        filtered = filtered.filter(log => {
+            const studentId = (log.student_id || "").toLowerCase();
+            const studentName = (log.student_name || "").toLowerCase();
+            const clubName = (log.club_name || "").toLowerCase();
+            const details = (log.details || "").toLowerCase();
+            const ip = (log.ip_address || "").toLowerCase();
+            return studentId.includes(searchVal) || 
+                   studentName.includes(searchVal) || 
+                   clubName.includes(searchVal) || 
+                   details.includes(searchVal) ||
+                   ip.includes(searchVal);
+        });
+    }
+
+    renderAdminLogs(filtered);
+}
+
+// ล้างคำค้นและฟิลเตอร์ทั้งหมดเพื่อแสดงผลล็อกทั้งหมด
+function clearLogFilters() {
+    document.getElementById("admin-log-search-input").value = "";
+    document.getElementById("admin-log-action-filter").value = "";
+    renderAdminLogs(state.auditLogs);
 }

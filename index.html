@@ -224,6 +224,9 @@
                     <button class="admin-tab-btn" id="admin-menu-settings" onclick="switchAdminSubTab('settings')">
                         <i class="fa-solid fa-sliders"></i> ตั้งค่าเปิด-ปิดระบบ
                     </button>
+                    <button class="admin-tab-btn" id="admin-menu-logs" onclick="switchAdminSubTab('logs')">
+                        <i class="fa-solid fa-list-check"></i> ตรวจสอบประวัติ (Audit Logs)
+                    </button>
                     <button class="admin-tab-btn" style="margin-top: 2rem; color: #fca5a5;" onclick="adminLogout()">
                         <i class="fa-solid fa-right-from-bracket"></i> ออกจากระบบ
                     </button>
@@ -469,6 +472,63 @@
                         <button class="btn-primary" style="margin-top: 2rem;" onclick="saveSystemSettings()">
                             <i class="fa-solid fa-floppy-disk"></i> บันทึกการตั้งค่าระบบ
                         </button>
+                    </div>
+
+                    <!-- Sub-Tab 6: Audit Logs (ตรวจสอบประวัติความปลอดภัย) -->
+                    <div id="admin-sub-logs" class="admin-sub-view" style="display: none;">
+                        <div class="admin-content-header" style="margin-bottom: 1.5rem;">
+                            <div>
+                                <h3>ระบบตรวจสอบประวัติและความปลอดภัย (Audit Logs)</h3>
+                                <p style="color: var(--text-secondary); font-size: 0.9rem;">
+                                    ตรวจสอบความปลอดภัย ติดตามผู้สมัคร IP Address รายละเอียดอุปกรณ์เบราว์เซอร์ เพื่อช่วยในการสืบค้นกรณีมีการแกล้งสมัครเรียนหรือยกเลิกสิทธิ์
+                                </p>
+                            </div>
+                        </div>
+
+                        <!-- 🔍 ตัวกรองและค้นหาประวัติความปลอดภัย -->
+                        <div style="display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; align-items: center;">
+                            <div style="flex: 1; min-width: 250px; position: relative;">
+                                <input type="text" id="admin-log-search-input" placeholder="ค้นหาด้วยรหัสนักเรียน, ชื่อ หรือรายละเอียด..." 
+                                       onkeyup="filterAdminLogs()"
+                                       style="width: 100%; background: rgba(7, 23, 15, 0.7); border: var(--border-glass); color: var(--text-primary); padding: 10px 12px 10px 36px; border-radius: 6px; font-size: 0.9rem; outline: none;">
+                                <i class="fa-solid fa-magnifying-glass" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-secondary); font-size: 0.85rem;"></i>
+                            </div>
+                            <select id="admin-log-action-filter" onchange="filterAdminLogs()"
+                                    style="background: #0d281a; border: var(--border-glass); color: var(--text-primary); padding: 10px 12px; border-radius: 6px; font-size: 0.9rem; width: 220px; height: 42px; cursor: pointer; outline: none;">
+                                <option value="" style="background: #0d281a; color: var(--text-primary);">-- กิจกรรมทั้งหมด --</option>
+                                <option value="REGISTER_SUCCESS" style="background: #0d281a; color: var(--text-primary);">ลงทะเบียนสำเร็จ (เดิม)</option>
+                                <option value="REGISTER_PENDING" style="background: #0d281a; color: var(--text-primary);">ลงทะเบียนสำรอง (ใหม่)</option>
+                                <option value="PENDING_APPROVED" style="background: #0d281a; color: var(--text-primary);">ครูอนุมัติสิทธิ์</option>
+                                <option value="REGISTRATION_DELETED" style="background: #0d281a; color: var(--text-primary);">ครูยกเลิกสิทธิ์</option>
+                                <option value="SETTINGS_UPDATED" style="background: #0d281a; color: var(--text-primary);">ครูแก้ไขตั้งค่าระบบ</option>
+                            </select>
+                            <button class="btn-secondary" onclick="clearLogFilters()" style="padding: 10px 15px; border-radius: 6px; font-size: 0.9rem; display: flex; align-items: center; gap: 6px; height: 42px; cursor: pointer;">
+                                <i class="fa-solid fa-rotate-left"></i> ล้างตัวกรอง
+                            </button>
+                        </div>
+
+                        <div class="search-results-table-container" style="max-height: 480px; overflow-y: auto;">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 150px;">วัน-เวลา</th>
+                                        <th style="width: 140px;">กิจกรรม</th>
+                                        <th style="width: 180px;">นักเรียน</th>
+                                        <th style="width: 150px;">ชุมนุม</th>
+                                        <th style="width: 120px;">IP Address</th>
+                                        <th>รายละเอียดความปลอดภัย / อุปกรณ์</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="admin-logs-tbody">
+                                    <tr>
+                                        <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 3rem 0;">
+                                            <i class="fa-solid fa-circle-notch fa-spin" style="font-size: 2rem; color: var(--accent-mint); margin-bottom: 1rem;"></i>
+                                            <p>กำลังดาวน์โหลดบันทึกประวัติความปลอดภัย...</p>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
 
                 </div>

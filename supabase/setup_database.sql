@@ -9,6 +9,7 @@ DROP TABLE IF EXISTS registrations CASCADE;
 DROP TABLE IF EXISTS students CASCADE;
 DROP TABLE IF EXISTS clubs CASCADE;
 DROP TABLE IF EXISTS settings CASCADE;
+DROP TABLE IF EXISTS audit_logs CASCADE;
 
 -- 2. สร้างตารางการตั้งค่าระบบ (Settings)
 CREATE TABLE settings (
@@ -84,6 +85,25 @@ CREATE POLICY "Allow public insert registrations" ON registrations FOR INSERT WI
 CREATE POLICY "Allow public update/delete for admin" ON registrations FOR ALL USING (true);
 
 
+-- 6. สร้างตารางบันทึกประวัติความปลอดภัยและการกระทำระบบ (Audit Logs)
+CREATE TABLE audit_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id TEXT, -- รหัสนักเรียนที่เกี่ยวข้อง
+    student_name TEXT, -- ชื่อนักเรียนที่เกี่ยวข้อง
+    action TEXT NOT NULL, -- กิจกรรม (เช่น REGISTER_SUCCESS, REGISTER_PENDING, REGISTRATION_DELETED, PENDING_APPROVED, PENDING_REJECTED)
+    club_name TEXT, -- ชื่อชุมนุม
+    ip_address TEXT, -- IP ของผู้ใช้งาน
+    user_agent TEXT, -- เบราว์เซอร์และอุปกรณ์
+    details TEXT, -- รายละเอียดเพิ่มเติม
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- เปิดใช้งาน RLS สำหรับ audit_logs
+ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow public insert access to audit_logs" ON audit_logs FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow read access to audit_logs for admin" ON audit_logs FOR SELECT USING (true);
+
+
 -- =====================================================================
 -- ⚡ STORED PROCEDURE: register_student_atomic
 -- ฟังก์ชันประมวลผลการสมัครแบบ Atomic เพื่อป้องกัน Race Condition และรองรับโหลดพร้อมกันสูง
@@ -93,7 +113,9 @@ CREATE OR REPLACE FUNCTION register_student_atomic(
     p_student_id TEXT,
     p_first_name TEXT,
     p_last_name TEXT,
-    p_level TEXT
+    p_level TEXT,
+    p_ip_address TEXT,
+    p_user_agent TEXT
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -200,6 +222,18 @@ BEGIN
     UPDATE clubs
     SET enrolled_count = enrolled_count + 1
     WHERE id = p_club_id;
+
+    -- 7. บันทึกประวัติความปลอดภัย (Audit Log)
+    INSERT INTO audit_logs (student_id, student_name, action, club_name, ip_address, user_agent, details)
+    VALUES (
+        v_student_id_cleaned,
+        TRIM(p_first_name) || ' ' || TRIM(p_last_name),
+        CASE WHEN v_status = 'verified' THEN 'REGISTER_SUCCESS' ELSE 'REGISTER_PENDING' END,
+        v_club_name,
+        COALESCE(p_ip_address, 'Unknown IP'),
+        COALESCE(p_user_agent, 'Unknown Device'),
+        'นักเรียนทำการลงทะเบียนด้วยตนเอง (ระดับห้อง: ' || p_level || ', สถานะสิทธิ์: ' || v_status || ')'
+    );
 
     -- ส่งกลับผลลัพธ์สำเร็จ
     RETURN jsonb_build_object(
