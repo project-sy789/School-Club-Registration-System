@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบลงทะเบียนเรียนชุมนุมนักเรียนระดับมัธยม | ระบบสำเร็จรูปพรีเมียม</title>
+    <meta name="description" content="ระบบสมัครเรียนและลงทะเบียนชุมนุมสำหรับนักเรียนระดับมัธยมศึกษาตอนต้นและตอนปลาย รองรับผู้เข้าใช้งานหนาแน่นอย่างรวดเร็วและปลอดภัย พร้อมระบบสำรองสิทธิ์สำหรับนักเรียนใหม่">
+    
+    <!-- 🎨 CSS Stylesheets & Icons -->
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- 🚀 External Libraries (Supabase and Confetti) via CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+</head>
+<body>
+
+    <!-- 🧭 1. Navigation Header -->
+    <header>
+        <div class="header-container">
+            <div class="logo-area" id="logo-home-trigger" style="cursor: pointer;">
+                <div class="logo-icon">
+                    <i class="fa-solid fa-graduation-cap"></i>
+                </div>
+                <div class="logo-text">
+                    <h1 id="header-school-name">ระบบลงทะเบียนชุมนุม</h1>
+                    <span id="header-semester-label">ภาคเรียนที่ 1/2569</span>
+                </div>
+            </div>
+            <nav>
+                <button class="nav-btn active" id="nav-home" onclick="switchTab('home')">
+                    <i class="fa-solid fa-house-chimney"></i> ชุมนุมทั้งหมด
+                </button>
+                <button class="nav-btn" id="nav-search" onclick="switchTab('search')">
+                    <i class="fa-solid fa-magnifying-glass"></i> ค้นหาการลงทะเบียน
+                </button>
+                <button class="nav-btn" id="nav-admin" onclick="switchTab('admin')">
+                    <i class="fa-solid fa-user-shield"></i> ผู้ดูแลระบบ
+                </button>
+            </nav>
+        </div>
+    </header>
+
+    <!-- 🎬 2. Hero Banner Section -->
+    <section class="hero-section" id="hero-area">
+        <div class="hero-banner glass-container">
+            <div class="hero-content">
+                <span class="semester-badge" id="banner-semester-badge">ปีการศึกษา 2569</span>
+                <h2 id="banner-school-title">ยินดีต้อนรับสู่ระบบลงทะเบียนชุมนุม</h2>
+                <p>กรุณาเตรียมเลขประจำตัวนักเรียนของท่านให้พร้อมเพื่อใช้สิทธิ์ลงทะเบียนชุมนุมเรียน หากท่านเป็นนักเรียนใหม่หรือหาข้อมูลไม่พบ สามารถเลือกกรอกข้อมูลตนเองเพื่อสำรองสิทธิ์เข้าร่วมได้ทันทีโดยไม่เสียสิทธิ์!</p>
+            </div>
+            
+            <div class="system-status-panel">
+                <div id="system-status-badge" class="status-badge closed">
+                    <div class="pulse-dot"></div>
+                    <span id="system-status-text">กำลังโหลดสถานะระบบ...</span>
+                </div>
+                
+                <div class="countdown-box" id="countdown-container" style="display: none;">
+                    <span id="countdown-label">ระบบจะเปิดในอีก:</span>
+                    <span class="countdown-timer" id="countdown-timer-val">00:00:00</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 🏠 Tab Content A: Student Portal (Home) -->
+    <main id="tab-content-home">
+        <!-- 🔍 Search & Filters Bar -->
+        <section class="search-filter-section">
+            <div class="search-bar-container glass-container">
+                <div class="input-group">
+                    <label for="search-input">ค้นหาชุมนุม</label>
+                    <input type="text" id="search-input" placeholder="พิมพ์ชื่อชุมนุม หรือ ชื่อครู..." oninput="filterClubs()">
+                </div>
+                
+                <div class="input-group">
+                    <label for="filter-grade">ระดับชั้นของคุณ</label>
+                    <select id="filter-grade" onchange="filterClubs()">
+                        <option value="all">แสดงทุกระดับชั้น</option>
+                        <option value="ม.1">มัธยมศึกษาปีที่ 1 (ม.1)</option>
+                        <option value="ม.2">มัธยมศึกษาปีที่ 2 (ม.2)</option>
+                        <option value="ม.3">มัธยมศึกษาปีที่ 3 (ม.3)</option>
+                        <option value="ม.4">มัธยมศึกษาปีที่ 4 (ม.4)</option>
+                        <option value="ม.5">มัธยมศึกษาปีที่ 5 (ม.5)</option>
+                        <option value="ม.6">มัธยมศึกษาปีที่ 6 (ม.6)</option>
+                    </select>
+                </div>
+                
+                <div class="input-group">
+                    <label for="filter-availability">สถานะที่นั่ง</label>
+                    <select id="filter-availability" onchange="filterClubs()">
+                        <option value="all">แสดงทั้งหมด</option>
+                        <option value="available">เฉพาะที่ยังไม่เต็ม</option>
+                    </select>
+                </div>
+                
+                <div class="toggle-group" onclick="toggleFilterMyGrades()">
+                    <input type="checkbox" id="my-grades-only" style="display:none;">
+                    <div class="toggle-switch"></div>
+                    <span style="font-size: 0.9rem; color: var(--text-secondary);">คัดกรองเฉพาะระดับชั้นที่ฉันสมัครได้</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- 🏫 Clubs List Grid -->
+        <section class="clubs-section">
+            <div class="grid-title">
+                <i class="fa-solid fa-list-ul" style="color: var(--accent-mint);"></i> 
+                รายชื่อชุมนุมที่เปิดรับสมัคร 
+                <span id="clubs-count-badge">0 ชุมนุม</span>
+            </div>
+            
+            <div class="clubs-grid" id="clubs-grid-container">
+                <!-- โหลดการ์ดชุมนุมด้วย JavaScript -->
+                <div style="grid-column: 1/-1; text-align: center; padding: 4rem 0; color: var(--text-secondary);">
+                    <i class="fa-solid fa-circle-notch fa-spin" style="font-size: 2.5rem; color: var(--accent-mint); margin-bottom: 1rem;"></i>
+                    <p>กำลังดาวน์โหลดข้อมูลชุมนุมและที่นั่งว่าง...</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- 📝 Tab Content B: Search Registrations -->
+    <main id="tab-content-search" style="display: none;">
+        <section class="search-reg-section">
+            <div class="registrations-card glass-container">
+                <div class="admin-content-header" style="margin-bottom: 1rem;">
+                    <h3><i class="fa-solid fa-magnifying-glass" style="color: var(--accent-mint);"></i> ค้นหาและตรวจสอบผลการลงทะเบียน</h3>
+                    <p style="color: var(--text-secondary); width: 100%; font-size: 0.9rem; margin-top: 5px;">
+                        คุณสามารถค้นหาประวัติการลงทะเบียนได้โดยระบุ เลขประจำตัวนักเรียน หรือ ชื่อ-นามสกุล ของนักเรียน
+                    </p>
+                </div>
+                
+                <div class="registrations-search-bar">
+                    <input type="text" id="reg-search-input" placeholder="กรอกเลขประจำตัวนักเรียน หรือชื่อ-นามสกุล เพื่อค้นหา..." onkeypress="handleSearchRegKeyPress(event)">
+                    <button class="btn-primary" onclick="searchStudentRegistrations()">
+                        <i class="fa-solid fa-magnifying-glass"></i> ค้นหาข้อมูล
+                    </button>
+                </div>
+                
+                <div class="search-results-table-container" id="reg-search-results-container" style="display: none;">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>เลขประจำตัว</th>
+                                <th>ชื่อ - นามสกุล</th>
+                                <th>ห้องเรียน</th>
+                                <th>ชุมนุมที่ลงทะเบียน</th>
+                                <th>ครูผู้ดูแล</th>
+                                <th>สถานะการลงทะเบียน</th>
+                                <th>วันเวลาที่ลงทะเบียน</th>
+                            </tr>
+                        </thead>
+                        <tbody id="reg-search-results-body">
+                            <!-- ข้อมูลจะถูกเขียนขึ้นมาด้วย JS -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div id="reg-search-empty-state" style="text-align: center; padding: 3rem 0; color: var(--text-secondary);">
+                    <i class="fa-regular fa-folder-open" style="font-size: 3rem; color: var(--text-muted); margin-bottom: 1rem;"></i>
+                    <p>กรุณากรอกเลขประจำตัว หรือชื่อนักเรียนเพื่อค้นหาข้อมูล</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- ⚙️ Tab Content C: Admin Dashboard -->
+    <main id="tab-content-admin" style="display: none;">
+        <section class="admin-section">
+            
+            <!-- 🔑 Admin Passcode Screen (แสดงหากยังไม่ได้ยืนยันตัวตนครู) -->
+            <div class="admin-login-card glass-container" id="admin-login-area">
+                <div class="logo-icon" style="margin: 0 auto 1.5rem auto; width: 60px; height: 60px; font-size: 2rem;">
+                    <i class="fa-solid fa-lock"></i>
+                </div>
+                <h3>เข้าสู่ระบบผู้ดูแลระบบ</h3>
+                <p>กรุณาระบุรหัสผ่านควบคุม (Admin Password) ของโรงเรียนเพื่อเข้าจัดการระบบและดึงข้อมูลรายงาน</p>
+                
+                <div class="input-group" style="margin-bottom: 1.5rem; text-align: left;">
+                    <label for="admin-passcode-input">รหัสผ่านควบคุม</label>
+                    <input type="password" id="admin-passcode-input" placeholder="กรอกรหัสผ่าน..." onkeypress="handleAdminLoginKeyPress(event)">
+                </div>
+                
+                <button class="btn-primary" style="width: 100%;" onclick="attemptAdminLogin()">
+                    <i class="fa-solid fa-right-to-bracket"></i> ยืนยันรหัสผ่าน
+                </button>
+            </div>
+
+            <!-- 📊 Admin control panel (แสดงเมื่อ Login ผ่านแล้ว) -->
+            <div class="admin-dashboard-container" id="admin-dashboard-area" style="display: none;">
+                
+                <!-- Sidebar เมนู -->
+                <div class="admin-sidebar">
+                    <button class="admin-tab-btn active" id="admin-menu-stats" onclick="switchAdminSubTab('stats')">
+                        <i class="fa-solid fa-chart-pie"></i> รายงานสรุปผล
+                    </button>
+                    <button class="admin-tab-btn" id="admin-menu-pending" onclick="switchAdminSubTab('pending')">
+                        <i class="fa-solid fa-user-clock"></i> จัดการเด็กสมัครใหม่ (<span id="admin-pending-badge">0</span>)
+                    </button>
+                    <button class="admin-tab-btn" id="admin-menu-clubs" onclick="switchAdminSubTab('clubs')">
+                        <i class="fa-solid fa-school"></i> จัดการชุมนุม
+                    </button>
+                    <button class="admin-tab-btn" id="admin-menu-students" onclick="switchAdminSubTab('students')">
+                        <i class="fa-solid fa-users"></i> นำเข้าข้อมูลนักเรียน
+                    </button>
+                    <button class="admin-tab-btn" id="admin-menu-settings" onclick="switchAdminSubTab('settings')">
+                        <i class="fa-solid fa-sliders"></i> ตั้งค่าเปิด-ปิดระบบ
+                    </button>
+                    <button class="admin-tab-btn" style="margin-top: 2rem; color: #fca5a5;" onclick="adminLogout()">
+                        <i class="fa-solid fa-right-from-bracket"></i> ออกจากระบบ
+                    </button>
+                </div>
+
+                <!-- พื้นที่แสดงข้อมูลควบคุม -->
+                <div class="admin-content-card glass-container">
+                    
+                    <!-- Sub-Tab 1: Analytics & Report (สถิติรายงาน) -->
+                    <div id="admin-sub-stats" class="admin-sub-view">
+                        <div class="admin-content-header">
+                            <div>
+                                <h3>รายงานและสถิติภาพรวม</h3>
+                                <p style="color: var(--text-secondary); font-size: 0.9rem;">ข้อมูลสรุปยอดการรับสมัครและรายชื่อนักเรียนแยกตามชุมนุม</p>
+                            </div>
+                            <button class="btn-primary" onclick="exportAllRegistrationsToCSV()">
+                                <i class="fa-solid fa-file-excel"></i> ดาวน์โหลด Excel ทั้งหมด
+                            </button>
+                        </div>
+                        
+                        <!-- สถิติภาพรวมในบัตร -->
+                        <div class="stats-grid">
+                            <div class="stat-card">
+                                <div class="val" id="stat-total-clubs">0</div>
+                                <div class="lbl">จำนวนชุมนุมทั้งหมด</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="val" id="stat-total-seats">0</div>
+                                <div class="lbl">โควตาที่นั่งทั้งหมด</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="val" id="stat-total-enrolled" style="color: var(--accent-mint);">0</div>
+                                <div class="lbl">ลงทะเบียนสำเร็จแล้ว</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="val" id="stat-total-pending" style="color: var(--status-pending);">0</div>
+                                <div class="lbl">เด็กใหม่ (จองสิทธิ์)</div>
+                            </div>
+                        </div>
+
+                        <!-- ตารางแสดงอัตราการสมัครของแต่ละชุมนุม -->
+                        <div style="margin-top: 2rem;">
+                            <h4 style="margin-bottom: 1rem;"><i class="fa-solid fa-chart-bar" style="color: var(--accent-mint);"></i> สถานะแต่ละชุมนุมและการจองที่นั่ง</h4>
+                            <div class="search-results-table-container">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>ชื่อชุมนุม</th>
+                                            <th>ครูผู้สอน</th>
+                                            <th>ระดับชั้นที่รับ</th>
+                                            <th>จำนวนรับ</th>
+                                            <th>สมัครแล้ว (เดิม / ใหม่)</th>
+                                            <th>ความหนาแน่น</th>
+                                            <th>การจัดการ</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="admin-stats-clubs-tbody">
+                                        <!-- เขียนด้วย JS -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Sub-Tab 2: Verify Pending Students (จัดการเด็กใหม่จองสิทธิ์) -->
+                    <div id="admin-sub-pending" class="admin-sub-view" style="display: none;">
+                        <div class="admin-content-header">
+                            <div>
+                                <h3>ตรวจสอบการสมัครของนักเรียนใหม่ / ไม่มีชื่อในระบบ</h3>
+                                <p style="color: var(--text-secondary); font-size: 0.9rem;">
+                                    นักเรียนที่กรอกข้อมูลเองเพื่อสำรองสิทธิ์ (Pending) สามารถตรวจยืนยันสิทธิ์หรือแก้ไขข้อมูลได้ที่นี่
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="search-results-table-container">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>ชื่อ-นามสกุล</th>
+                                        <th>ระดับชั้น/ห้อง</th>
+                                        <th>ชุมนุมที่จอง</th>
+                                        <th>เลขประจำตัวที่กรอก</th>
+                                        <th>วันที่สมัคร</th>
+                                        <th>การตรวจสอบและอนุมัติ</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="admin-pending-students-tbody">
+                                    <!-- เขียนด้วย JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Sub-Tab 3: Manage Clubs (จัดการชุมนุม) -->
+                    <div id="admin-sub-clubs" class="admin-sub-view" style="display: none;">
+                        <div class="admin-content-header">
+                            <div>
+                                <h3>จัดการข้อมูลชุมนุมและโควตา</h3>
+                                <p style="color: var(--text-secondary); font-size: 0.9rem;">คุณสามารถเพิ่ม ลบ หรือแก้ไขข้อมูลชุมนุมที่มีอยู่ได้ที่นี่</p>
+                            </div>
+                            <button class="btn-primary" onclick="openClubFormModal()">
+                                <i class="fa-solid fa-plus"></i> เพิ่มชุมนุมใหม่
+                            </button>
+                        </div>
+
+                        <div class="search-results-table-container">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>ชื่อชุมนุม</th>
+                                        <th>ครูผู้ดูแล</th>
+                                        <th>สถานที่เรียน</th>
+                                        <th>ระดับชั้น</th>
+                                        <th>จำนวนรับ</th>
+                                        <th>คำอธิบาย</th>
+                                        <th>ตัวเลือก</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="admin-manage-clubs-tbody">
+                                    <!-- เขียนด้วย JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Sub-Tab 4: Import Students (นำเข้ารายชื่อเด็ก) -->
+                    <div id="admin-sub-students" class="admin-sub-view" style="display: none;">
+                        <div class="admin-content-header">
+                            <div>
+                                <h3>นำเข้าฐานข้อมูลนักเรียนที่มีอยู่แล้ว</h3>
+                                <p style="color: var(--text-secondary); font-size: 0.9rem;">
+                                    อัปโหลดไฟล์ Excel/CSV ข้อมูลนักเรียนเดิมเพื่อใช้ในการดึงข้อมูลอัตโนมัติและตรวจสอบสิทธิ์
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="file-dropzone" onclick="document.getElementById('csv-file-input').click()">
+                            <i class="fa-solid fa-file-csv"></i>
+                            <h4>ลากไฟล์ .csv มาวางที่นี่ หรือคลิกเพื่ออัปโหลด</h4>
+                            <p style="color: var(--text-secondary); font-size: 0.85rem;">
+                                โครงสร้างคอลัมน์ของไฟล์ CSV: <strong>student_id, first_name, last_name, level</strong> (เข้ารหัส UTF-8)
+                            </p>
+                            <input type="file" id="csv-file-input" accept=".csv" onchange="handleStudentCSVImport(event)">
+                        </div>
+
+                        <div style="margin-top: 2rem;">
+                            <h4 style="margin-bottom: 0.75rem;"><i class="fa-solid fa-database" style="color: var(--accent-mint);"></i> ฐานข้อมูลนักเรียนปัจจุบัน</h4>
+                            <div class="search-results-table-container" style="max-height: 350px; overflow-y: auto;">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>เลขประจำตัว</th>
+                                            <th>ชื่อจริง</th>
+                                            <th>นามสกุล</th>
+                                            <th>ห้องเรียน</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="admin-students-list-tbody">
+                                        <tr>
+                                            <td colspan="4" style="text-align: center; color: var(--text-muted);">ไม่พบรายชื่อในฐานข้อมูล หรือกำลังดาวน์โหลด...</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Sub-Tab 5: System Settings (ตั้งค่าระบบเปิด-ปิด) -->
+                    <div id="admin-sub-settings" class="admin-sub-view" style="display: none;">
+                        <div class="admin-content-header">
+                            <div>
+                                <h3>ตั้งค่าการรับสมัครและกำหนดเวลา</h3>
+                                <p style="color: var(--text-secondary); font-size: 0.9rem;">ควบคุมเวลาการเปิดรับสมัครชุมนุมสำเร็จรูปแบบตั้งเวลาล่วงหน้า</p>
+                            </div>
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-top: 1rem;">
+                            <div class="input-group">
+                                <label>สถานะเปิดระบบรับสมัคร</label>
+                                <div class="toggle-group" onclick="toggleRegistrationState()" style="margin-top: 10px;">
+                                    <input type="checkbox" id="admin-settings-is-active" style="display:none;">
+                                    <div class="toggle-switch"></div>
+                                    <span id="admin-settings-status-label" style="font-size: 0.95rem; font-weight: 600;">ปิดระบบสมัคร</span>
+                                </div>
+                            </div>
+                            
+                            <div class="input-group">
+                                <label for="admin-settings-school-name">ชื่อโรงเรียน</label>
+                                <input type="text" id="admin-settings-school-name" placeholder="ระบุชื่อโรงเรียน...">
+                            </div>
+
+                            <div class="input-group">
+                                <label for="admin-settings-semester">ภาคเรียน / ปีการศึกษา</label>
+                                <input type="text" id="admin-settings-semester" placeholder="เช่น 1/2569">
+                            </div>
+
+                            <div class="input-group">
+                                <label for="admin-settings-admin-password">รหัสผ่านควบคุม Admin ใหม่</label>
+                                <input type="password" id="admin-settings-admin-password" placeholder="ใส่รหัสผ่านใหม่หากต้องการแก้ไข...">
+                            </div>
+
+                            <div class="input-group">
+                                <label for="admin-settings-start-time">วันเวลาเปิดรับสมัคร</label>
+                                <input type="datetime-local" id="admin-settings-start-time">
+                            </div>
+
+                            <div class="input-group">
+                                <label for="admin-settings-end-time">วันเวลาปิดรับสมัคร</label>
+                                <input type="datetime-local" id="admin-settings-end-time">
+                            </div>
+                        </div>
+
+                        <button class="btn-primary" style="margin-top: 2rem;" onclick="saveSystemSettings()">
+                            <i class="fa-solid fa-floppy-disk"></i> บันทึกการตั้งค่าระบบ
+                        </button>
+                    </div>
+
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- 📋 3. Dynamic Registration Details Modal (หน้าต่างกรอกฟอร์มลงทะเบียน) -->
+    <div class="modal-overlay" id="registration-modal">
+        <div class="modal-card glass-container">
+            <button class="modal-close" onclick="closeRegistrationModal()"><i class="fa-solid fa-xmark"></i></button>
+            <div id="modal-form-content">
+                <div class="modal-title">ลงทะเบียนเลือกชุมนุม</div>
+                <div class="modal-subtitle">กรุณากรอกเลขประจำตัวและยืนยันข้อมูลเพื่อจองสิทธิ์เข้าร่วม</div>
+                
+                <div class="modal-club-details">
+                    <div style="font-weight: 700; color: var(--accent-mint); font-size: 1.1rem;" id="modal-club-name">ชื่อชุมนุม</div>
+                    <div style="font-size: 0.85rem; color: var(--text-secondary);">
+                        <span id="modal-club-teacher"><i class="fa-solid fa-user-tie"></i> ครูผู้สอน: ครูใจดี</span> &nbsp;&nbsp;&nbsp;
+                        <span id="modal-club-location"><i class="fa-solid fa-location-dot"></i> สถานที่: ห้อง 123</span>
+                    </div>
+                </div>
+
+                <div class="modal-form">
+                    <!-- ส่วนตรวจสอบสิทธิ์ด้วยเลขประจำตัว -->
+                    <div class="id-verification-row">
+                        <div class="input-group">
+                            <label for="student-id-input">เลขประจำตัวนักเรียน</label>
+                            <input type="text" id="student-id-input" placeholder="ระบุเลขประจำตัว 5 หลัก..." onkeypress="handleVerifyIdKeyPress(event)">
+                        </div>
+                        <button class="verify-id-btn" onclick="verifyStudentID()">
+                            <i class="fa-solid fa-circle-check"></i> ตรวจสอบ
+                        </button>
+                    </div>
+
+                    <!-- แถวแจ้งเตือนผลการตรวจสอบ -->
+                    <div id="verify-alert-box" class="verification-alert"></div>
+
+                    <!-- ส่วนกรอกข้อมูลด้วยตนเอง (จะถูกเปิดเมื่อไม่พบเลขนักเรียนในระบบ หรือเป็นนักเรียนใหม่) -->
+                    <div class="manual-entry-area" id="manual-entry-form">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                            <div class="input-group">
+                                <label for="first-name-input">ชื่อจริง (ไม่ต้องมีคำนำหน้า)</label>
+                                <input type="text" id="first-name-input" placeholder="เช่น สมยศ">
+                            </div>
+                            <div class="input-group">
+                                <label for="last-name-input">นามสกุล</label>
+                                <input type="text" id="last-name-input" placeholder="เช่น รุ่งเรือง">
+                            </div>
+                        </div>
+
+                        <div class="input-group">
+                            <label for="level-input">ชั้นเรียนและห้องเรียน</label>
+                            <select id="level-input">
+                                <option value="">เลือกระดับชั้น/ห้อง...</option>
+                                <optgroup label="มัธยมศึกษาตอนต้น">
+                                    <option value="ม.1/1">ม.1/1</option><option value="ม.1/2">ม.1/2</option><option value="ม.1/3">ม.1/3</option><option value="ม.1/4">ม.1/4</option>
+                                    <option value="ม.2/1">ม.2/1</option><option value="ม.2/2">ม.2/2</option><option value="ม.2/3">ม.2/3</option><option value="ม.2/4">ม.2/4</option>
+                                    <option value="ม.3/1">ม.3/1</option><option value="ม.3/2">ม.3/2</option><option value="ม.3/3">ม.3/3</option><option value="ม.3/4">ม.3/4</option>
+                                </optgroup>
+                                <optgroup label="มัธยมศึกษาตอนปลาย">
+                                    <option value="ม.4/1">ม.4/1</option><option value="ม.4/2">ม.4/2</option><option value="ม.4/3">ม.4/3</option><option value="ม.4/4">ม.4/4</option>
+                                    <option value="ม.5/1">ม.5/1</option><option value="ม.5/2">ม.5/2</option><option value="ม.5/3">ม.5/3</option><option value="ม.5/4">ม.5/4</option>
+                                    <option value="ม.6/1">ม.6/1</option><option value="ม.6/2">ม.6/2</option><option value="ม.6/3">ม.6/3</option><option value="ม.6/4">ม.6/4</option>
+                                </optgroup>
+                            </select>
+                        </div>
+                    </div>
+
+                    <button class="register-btn active" style="margin-top: 1rem;" id="submit-registration-btn" onclick="submitStudentRegistration()">
+                        <i class="fa-solid fa-signature"></i> ยืนยันสมัครเข้าชุมนุมนี้
+                    </button>
+                </div>
+            </div>
+
+            <!-- ส่วนการแสดงบัตรลงทะเบียนเมื่อลงสำเร็จ (Ticket success view) -->
+            <div id="modal-success-content" class="ticket-container" style="display: none;">
+                <div class="success-icon"><i class="fa-solid fa-check"></i></div>
+                <div>
+                    <h3 style="font-size: 1.5rem; color: var(--accent-mint); font-weight: 700;">ลงทะเบียนจองสิทธิ์สำเร็จ!</h3>
+                    <p style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 4px;">ข้อมูลของท่านถูกจองและล็อกที่นั่งในระบบฐานข้อมูลเรียบร้อยแล้ว</p>
+                </div>
+
+                <div class="success-ticket">
+                    <div class="ticket-header">
+                        <span id="ticket-school-name" style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase;">โรงเรียนมัธยมศึกษารวมวิทยายน</span>
+                        <h3 id="ticket-club-name">ชุมนุมวิทยาการคอมพิวเตอร์</h3>
+                    </div>
+                    <div class="ticket-details">
+                        <div class="ticket-field">
+                            <span class="label">ชื่อ - นามสกุล</span>
+                            <span class="val" id="ticket-student-name">สมคิด มั่นคง</span>
+                        </div>
+                        <div class="ticket-field">
+                            <span class="label">ชั้น / ห้องเรียน</span>
+                            <span class="val" id="ticket-student-level">ม.4/1</span>
+                        </div>
+                        <div class="ticket-field">
+                            <span class="label">เลขประจำตัวนักเรียน</span>
+                            <span class="val" id="ticket-student-id">10001</span>
+                        </div>
+                        <div class="ticket-field">
+                            <span class="label">สถานะสิทธิ์ในชุมนุม</span>
+                            <span class="ticket-status-badge verified" id="ticket-status-badge">ยืนยันแล้ว</span>
+                        </div>
+                        <div class="ticket-field full-width" style="margin-top: 10px;">
+                            <span class="label">สถานที่เรียนและครูผู้สอน</span>
+                            <span class="val" id="ticket-location-teacher" style="font-size: 0.9rem;">ครูผู้สอน | ห้อง 213</span>
+                        </div>
+                    </div>
+                </div>
+
+                <button class="btn-primary" style="width: 100%;" onclick="closeRegistrationModal()">
+                    <i class="fa-solid fa-circle-check"></i> เสร็จสิ้นและกลับหน้าหลัก
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ➕ Admin Club Edit/Create Modal (หน้าต่างเพิ่ม/แก้ไขชุมนุม) -->
+    <div class="modal-overlay" id="club-form-modal">
+        <div class="modal-card glass-container" style="max-width: 600px;">
+            <button class="modal-close" onclick="closeClubFormModal()"><i class="fa-solid fa-xmark"></i></button>
+            <div class="modal-title" id="club-form-title">เพิ่มข้อมูลชุมนุมใหม่</div>
+            <div class="modal-subtitle">กรอกรายละเอียดเพื่อสร้างข้อมูลชุมนุมในระบบรับสมัคร</div>
+            
+            <input type="hidden" id="club-form-id">
+            
+            <div class="modal-form" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem;">
+                <div class="input-group" style="grid-column: span 2;">
+                    <label for="club-form-name">ชื่อชุมนุม</label>
+                    <input type="text" id="club-form-name" placeholder="ระบุชื่อชุมนุม เช่น ชุมนุมวิทยาศาสตร์แสนสนุก...">
+                </div>
+                
+                <div class="input-group">
+                    <label for="club-form-teacher">ครูผู้สอน</label>
+                    <input type="text" id="club-form-teacher" placeholder="ระบุชื่อครูผู้สอน...">
+                </div>
+
+                <div class="input-group">
+                    <label for="club-form-location">สถานที่เรียน</label>
+                    <input type="text" id="club-form-location" placeholder="เช่น ห้องปฏิบัติการฟิสิกส์ 2...">
+                </div>
+
+                <div class="input-group">
+                    <label for="club-form-capacity">จำนวนรับ (ที่นั่ง)</label>
+                    <input type="number" id="club-form-capacity" min="1" value="40">
+                </div>
+
+                <div class="input-group">
+                    <label>ระดับชั้นเรียนที่สมัครได้</label>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px;" id="club-form-grades-container">
+                        <label style="display:flex; align-items:center; gap:8px; text-transform:none; font-size:0.9rem; color:var(--text-secondary);">
+                            <input type="checkbox" value="ม.1" checked> ม.1
+                        </label>
+                        <label style="display:flex; align-items:center; gap:8px; text-transform:none; font-size:0.9rem; color:var(--text-secondary);">
+                            <input type="checkbox" value="ม.2" checked> ม.2
+                        </label>
+                        <label style="display:flex; align-items:center; gap:8px; text-transform:none; font-size:0.9rem; color:var(--text-secondary);">
+                            <input type="checkbox" value="ม.3" checked> ม.3
+                        </label>
+                        <label style="display:flex; align-items:center; gap:8px; text-transform:none; font-size:0.9rem; color:var(--text-secondary);">
+                            <input type="checkbox" value="ม.4" checked> ม.4
+                        </label>
+                        <label style="display:flex; align-items:center; gap:8px; text-transform:none; font-size:0.9rem; color:var(--text-secondary);">
+                            <input type="checkbox" value="ม.5" checked> ม.5
+                        </label>
+                        <label style="display:flex; align-items:center; gap:8px; text-transform:none; font-size:0.9rem; color:var(--text-secondary);">
+                            <input type="checkbox" value="ม.6" checked> ม.6
+                        </label>
+                    </div>
+                </div>
+
+                <div class="input-group" style="grid-column: span 2;">
+                    <label for="club-form-description">คำอธิบายและวัตถุประสงค์ชุมนุม</label>
+                    <textarea id="club-form-description" rows="3" style="background: rgba(7, 23, 15, 0.7); border: var(--border-glass); color: var(--text-primary); padding: 12px 16px; border-radius: var(--border-radius-sm); outline: none; font-size: 0.95rem; resize: none;" placeholder="กรอกรายละเอียดชุมนุมและเป้าหมายการเรียนรู้..."></textarea>
+                </div>
+                
+                <button class="btn-primary" style="grid-column: span 2; margin-top: 1rem; height: 48px; justify-content: center;" onclick="saveClubForm()">
+                    <i class="fa-solid fa-floppy-disk"></i> บันทึกข้อมูลชุมนุม
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 🛠️ 4. Setup Screen overlay (แสดงเฉพาะตอนเปิดใช้ครั้งแรกและยังไม่มีค่า Supabase credentials) -->
+    <div class="setup-overlay" id="setup-screen-overlay">
+        <div class="setup-card glass-container text-center">
+            <div class="setup-logo">
+                <i class="fa-solid fa-gears"></i>
+            </div>
+            <h2>การตั้งค่าใช้งานครั้งแรก (First-Time Setup)</h2>
+            <p>ยินดีต้อนรับสู่ระบบสำเร็จรูป! กรุณาระบุรหัส API ของโครงการ Supabase ของคุณเพื่อเชื่อมต่อฐานข้อมูลและทำงานได้สมบูรณ์ในทันที</p>
+            
+            <div class="modal-form" style="text-align: left;">
+                <div class="input-group">
+                    <label for="setup-supabase-url">Supabase URL</label>
+                    <input type="text" id="setup-supabase-url" placeholder="https://xxxxxx.supabase.co">
+                </div>
+                
+                <div class="input-group">
+                    <label for="setup-supabase-key">Supabase Anon Public API Key</label>
+                    <input type="password" id="setup-supabase-key" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...">
+                </div>
+
+                <div class="setup-instruction-box">
+                    <strong>วิธีการรับค่า API ในโครงการ Supabase:</strong>
+                    <ol>
+                        <li>เปิดหน้า Dashboard ของ Supabase แล้วกดสร้าง Project ใหม่</li>
+                        <li>เข้าไปที่เมนู <strong>Settings</strong> > <strong>API</strong></li>
+                        <li>คัดลอกค่า <strong>Project URL</strong> และ <strong>anon (public) Key</strong> มาใส่ในช่องด้านบน</li>
+                        <li>กดปุ่มบันทึก ระบบจะจำค่าเชื่อมต่อไว้ในบราวเซอร์นี้โดยอัตโนมัติ!</li>
+                    </ol>
+                </div>
+
+                <button class="btn-primary" style="width: 100%; justify-content: center; height: 48px; font-size: 1.05rem;" onclick="saveSetupCredentials()">
+                    <i class="fa-solid fa-circle-check"></i> บันทึกค่าเชื่อมต่อและเข้าสู่เว็บ
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 📊 5. Toast Notification Layer -->
+    <div class="toast-notification" id="toast-notify">
+        <i class="fa-solid fa-circle-info" id="toast-icon"></i>
+        <span id="toast-message">ข้อความแจ้งเตือน</span>
+    </div>
+
+    <!-- 💻 6. Javascript Logic Engine -->
+    <script src="config.js?v=1.0.1"></script>
+    <script src="app.js?v=1.0.1"></script>
+</body>
+</html>

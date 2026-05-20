@@ -1,0 +1,1339 @@
+/* =====================================================================
+   💻 CORE APPLICATION JAVASCRIPT - SCHOOL CLUB REGISTRATION SYSTEM
+   ===================================================================== */
+
+let supabaseClient = null;
+
+// 📊 Application State
+let state = {
+    clubs: [],
+    students: [],
+    registrations: [],
+    settings: {
+        school_config: { school_name: "ระบบลงทะเบียนชุมนุม", semester: "1/2569", admin_password: "admin" },
+        registration_period: { is_active: true, start_time: "", end_time: "" }
+    },
+    currentClub: null,
+    currentStudentInfo: null, // เก็บรายชื่อเด็กดึงจาก DB
+    isAdminLoggedIn: false,
+    activeTab: 'home',
+    activeAdminSubTab: 'stats',
+    myGradesFilterOnly: false
+};
+
+// 🏁 App Initialization on Page Load
+document.addEventListener("DOMContentLoaded", () => {
+    // ผูก Event ให้กับโลโก้กลับหน้าหลัก
+    document.getElementById("logo-home-trigger").addEventListener("click", () => {
+        switchTab('home');
+    });
+
+    initSupabaseConnection();
+});
+
+// =====================================================================
+// 🔑 1. SUPABASE CLIENT SET-UP & INITIALIZATION
+// =====================================================================
+function initSupabaseConnection() {
+    let url = "";
+    let key = "";
+
+    // 1. ตรวจสอบจากไฟล์ config.js
+    if (typeof SUPABASE_CONFIG !== 'undefined' && SUPABASE_CONFIG.SUPABASE_URL && SUPABASE_CONFIG.SUPABASE_ANON_KEY) {
+        url = SUPABASE_CONFIG.SUPABASE_URL;
+        key = SUPABASE_CONFIG.SUPABASE_ANON_KEY;
+    } 
+    // 2. ถ้าในไฟล์ config ว่าง ตรวจสอบจาก LocalStorage
+    else {
+        url = localStorage.getItem("custom_supabase_url");
+        key = localStorage.getItem("custom_supabase_key");
+    }
+
+    // 3. หากยังไม่มีสิทธิ์ ให้แสดงหน้าจอตั้งค่าตัวเชื่อมต่อ
+    if (!url || !key) {
+        document.getElementById("setup-screen-overlay").classList.add("active");
+        return;
+    }
+
+    try {
+        // เริ่มต้นการเชื่อมต่อ
+        supabaseClient = supabase.createClient(url, key);
+        document.getElementById("setup-screen-overlay").classList.remove("active");
+        
+        // โหลดข้อมูลตั้งค่าระบบก่อน แล้วค่อยโหลดรายชื่อชุมนุม
+        loadSystemSettings().then(() => {
+            loadClubsData();
+            startCountdownTimer();
+        });
+    } catch (e) {
+        showToast("ไม่สามารถสร้างการเชื่อมต่อไปยัง Supabase ได้ กรุณาตรวจสอบตัวแปรของคุณ", "error");
+        document.getElementById("setup-screen-overlay").classList.add("active");
+    }
+}
+
+// บันทึกค่าเชื่อมต่อที่ระบุเอง
+function saveSetupCredentials() {
+    const url = document.getElementById("setup-supabase-url").value.trim();
+    const key = document.getElementById("setup-supabase-key").value.trim();
+
+    if (!url || !key) {
+        showToast("กรุณากรอกข้อมูลให้ครบทุกช่อง", "error");
+        return;
+    }
+
+    localStorage.setItem("custom_supabase_url", url);
+    localStorage.setItem("custom_supabase_key", key);
+    
+    showToast("บันทึกข้อมูลการเชื่อมต่อสำเร็จ ระบบกำลังรีสตาร์ต...", "success");
+    setTimeout(() => {
+        window.location.reload();
+    }, 1000);
+}
+
+// =====================================================================
+// ⚙️ 2. SYSTEM SETTINGS & DATE CONTROLS
+// =====================================================================
+async function loadSystemSettings() {
+    if (!supabaseClient) return;
+    try {
+        const { data, error } = await supabaseClient.from("settings").select("*");
+        if (error) throw error;
+
+        if (data && data.length > 0) {
+            data.forEach(item => {
+                state.settings[item.key] = item.value;
+            });
+        }
+
+        // อัปเดตข้อมูลในหน้าเว็บ
+        updateSystemUI();
+    } catch (e) {
+        console.error("Error loading settings:", e);
+        showToast("เกิดข้อผิดพลาดในการโหลดการตั้งค่าระบบ", "error");
+    }
+}
+
+function updateSystemUI() {
+    const config = state.settings.school_config || {};
+    document.getElementById("header-school-name").innerText = config.school_name || "ระบบลงทะเบียนชุมนุม";
+    document.getElementById("header-semester-label").innerText = `ภาคเรียนที่ ${config.semester || "1/2569"}`;
+    document.getElementById("banner-school-title").innerText = `ยินดีต้อนรับสู่ระบบลงทะเบียนชุมนุม ${config.school_name || ""}`;
+    document.getElementById("banner-semester-badge").innerText = `ปีการศึกษา ${config.semester || "1/2569"}`;
+    document.getElementById("ticket-school-name").innerText = config.school_name || "";
+}
+
+// ฟังก์ชันนับถอยหลังและอัปเดตสถานะของระบบเปิด-ปิดรับสมัคร
+function startCountdownTimer() {
+    setInterval(() => {
+        const period = state.settings.registration_period || {};
+        const isActive = period.is_active;
+        
+        if (!isActive) {
+            updateStatusBadge("closed", "ปิดรับสมัคร (ควบคุมโดยผู้ดูแลระบบ)");
+            document.getElementById("countdown-container").style.display = "none";
+            return;
+        }
+
+        const now = new Date();
+        const startTime = period.start_time ? new Date(period.start_time) : null;
+        const endTime = period.end_time ? new Date(period.end_time) : null;
+
+        // เช็คช่วงเวลา
+        if (startTime && now < startTime) {
+            // ยังไม่เปิดรับสมัคร -> แสดงเวลานับถอยหลัง
+            updateStatusBadge("pending-time", "กำลังจะเปิดระบบในเร็วๆ นี้");
+            document.getElementById("countdown-container").style.display = "flex";
+            document.getElementById("countdown-label").innerText = "ระบบจะเปิดในอีก:";
+            
+            const diff = startTime - now;
+            document.getElementById("countdown-timer-val").innerText = formatTimeDiff(diff);
+        } else if (endTime && now > endTime) {
+            // หมดเขตลงทะเบียนแล้ว
+            updateStatusBadge("closed", "ปิดรับสมัคร (หมดเวลารับสมัคร)");
+            document.getElementById("countdown-container").style.display = "none";
+        } else {
+            // อยู่ในวันเปิดรับสมัครจริง
+            updateStatusBadge("open", "กำลังเปิดรับสมัครนักเรียน");
+            
+            if (endTime) {
+                document.getElementById("countdown-container").style.display = "flex";
+                document.getElementById("countdown-label").innerText = "จะปิดระบบในอีก:";
+                const diff = endTime - now;
+                document.getElementById("countdown-timer-val").innerText = formatTimeDiff(diff);
+            } else {
+                document.getElementById("countdown-container").style.display = "none";
+            }
+        }
+    }, 1000);
+}
+
+function updateStatusBadge(statusClass, labelText) {
+    const badge = document.getElementById("system-status-badge");
+    badge.className = `status-badge ${statusClass}`;
+    document.getElementById("system-status-text").innerText = labelText;
+}
+
+function formatTimeDiff(ms) {
+    const totalSecs = Math.floor(ms / 1000);
+    const hours = Math.floor(totalSecs / 3600);
+    const minutes = Math.floor((totalSecs % 3600) / 60);
+    const seconds = totalSecs % 60;
+    
+    return [
+        hours.toString().padStart(2, '0'),
+        minutes.toString().padStart(2, '0'),
+        seconds.toString().padStart(2, '0')
+    ].join(':');
+}
+
+// =====================================================================
+// 🏠 3. TAB NAVIGATION SWITCHES
+// =====================================================================
+function switchTab(tabId) {
+    state.activeTab = tabId;
+    
+    // รีเซ็ตคลาสปุ่มแถบเลือก
+    document.querySelectorAll(".nav-btn").forEach(btn => btn.classList.remove("active"));
+    document.getElementById(`nav-${tabId}`).classList.add("active");
+
+    // แสดง/ซ่อนพื้นที่เนื้อหาหลัก
+    document.getElementById("tab-content-home").style.display = tabId === 'home' ? 'block' : 'none';
+    document.getElementById("tab-content-search").style.display = tabId === 'search' ? 'block' : 'none';
+    document.getElementById("tab-content-admin").style.display = tabId === 'admin' ? 'block' : 'none';
+
+    // ซ่อน/แสดง Banner ให้เข้ากับหน้าเว็บ
+    document.getElementById("hero-area").style.display = tabId === 'home' ? 'block' : 'none';
+
+    if (tabId === 'home') {
+        loadClubsData();
+    } else if (tabId === 'admin' && state.isAdminLoggedIn) {
+        loadAdminDashboardData();
+    }
+}
+
+// =====================================================================
+// 🏫 4. CLUBS DATA LOADER & RENDERING
+// =====================================================================
+async function loadClubsData() {
+    if (!supabaseClient) return;
+    try {
+        const { data, error } = await supabaseClient
+            .from("clubs")
+            .select("*")
+            .order("name", { ascending: true });
+
+        if (error) throw error;
+        state.clubs = data || [];
+        
+        renderClubsGrid();
+    } catch (e) {
+        console.error("Error loading clubs:", e);
+        showToast("ไม่สามารถโหลดรายชื่อชุมนุมได้ กรุณาตรวจสอบอินเทอร์เน็ต", "error");
+    }
+}
+
+function renderClubsGrid() {
+    const container = document.getElementById("clubs-grid-container");
+    container.innerHTML = "";
+
+    // ดึงค่าการค้นหาและฟิลเตอร์
+    const searchVal = document.getElementById("search-input").value.toLowerCase().trim();
+    const gradeVal = document.getElementById("filter-grade").value;
+    const availabilityVal = document.getElementById("filter-availability").value;
+
+    const filtered = state.clubs.filter(club => {
+        // ค้นหาข้อความชื่อหรือครู
+        const matchSearch = club.name.toLowerCase().includes(searchVal) || 
+                            club.teacher.toLowerCase().includes(searchVal) ||
+                            (club.description && club.description.toLowerCase().includes(searchVal));
+        
+        // คัดกรองระดับชั้นที่เปิดรับ
+        const matchGrade = gradeVal === 'all' || club.grades.includes(gradeVal);
+
+        // คัดกรองเฉพาะห้องเรียนตัวเอง (ถ้าเปิดใช้งาน)
+        let matchMyGrade = true;
+        if (state.myGradesFilterOnly && state.currentStudentInfo) {
+            const levelPrefix = state.currentStudentInfo.level.split('/')[0]; // ดึง เช่น "ม.4" จาก "ม.4/1"
+            matchMyGrade = club.grades.includes(levelPrefix);
+        }
+
+        // คัดกรองสถานะที่นั่ง
+        const matchAvail = availabilityVal === 'all' || club.enrolled_count < club.capacity;
+
+        return matchSearch && matchGrade && matchMyGrade && matchAvail;
+    });
+
+    // แสดงจำนวนชุมนุมที่กรองได้
+    document.getElementById("clubs-count-badge").innerText = `${filtered.length} ชุมนุม`;
+
+    if (filtered.length === 0) {
+        container.innerHTML = `
+            <div style="grid-column: 1/-1; text-align: center; padding: 4rem 0; color: var(--text-muted);">
+                <i class="fa-regular fa-folder-open" style="font-size: 3rem; margin-bottom: 1rem;"></i>
+                <p>ไม่พบรายชื่อชุมนุมตามที่คัดกรอง หรือชุมนุมทั้งหมดโควตาเต็มหมดแล้ว</p>
+            </div>
+        `;
+        return;
+    }
+
+    // ตรวจเช็คเวลาเปิดรับสมัครในระดับบราวเซอร์
+    const period = state.settings.registration_period || {};
+    const now = new Date();
+    const systemOpen = period.is_active && 
+                       (!period.start_time || now >= new Date(period.start_time)) && 
+                       (!period.end_time || now <= new Date(period.end_time));
+
+    filtered.forEach(club => {
+        const isFull = club.enrolled_count >= club.capacity;
+        const pct = Math.min(100, Math.round((club.enrolled_count / club.capacity) * 100));
+        
+        // สีของ Progress Bar
+        let pctClass = "normal";
+        if (pct >= 90) pctClass = "danger";
+        else if (pct >= 70) pctClass = "warning";
+
+        // รวบรวมรายชื่อระดับชั้นมาแสดงเป็น Badge
+        const gradeBadgesHtml = club.grades.map(g => `<span class="grade-badge">${g}</span>`).join(" ");
+
+        // เช็คการปิดรับของปุ่ม
+        let btnHtml = "";
+        if (!systemOpen) {
+            btnHtml = `<button class="register-btn closed" disabled><i class="fa-solid fa-lock"></i> ยังไม่เปิดให้ลงทะเบียน</button>`;
+        } else if (isFull) {
+            btnHtml = `<button class="register-btn full" disabled><i class="fa-solid fa-ban"></i> ที่นั่งเต็มแล้ว</button>`;
+        } else {
+            btnHtml = `<button class="register-btn active" onclick="openRegistrationModal('${club.id}')"><i class="fa-solid fa-pen-to-square"></i> ลงทะเบียนเรียน</button>`;
+        }
+
+        const card = document.createElement("div");
+        card.className = "club-card glass-container";
+        card.innerHTML = `
+            <div class="club-header">
+                <div class="grade-badges">${gradeBadgesHtml}</div>
+            </div>
+            <div class="club-name">${club.name}</div>
+            <div class="club-info-line">
+                <i class="fa-solid fa-user-tie"></i> 
+                <span><strong>ผู้สอน:</strong> ${club.teacher}</span>
+            </div>
+            <div class="club-info-line">
+                <i class="fa-solid fa-location-dot"></i> 
+                <span><strong>สถานที่:</strong> ${club.location}</span>
+            </div>
+            <div class="club-description">${club.description || "ไม่ระบุคำอธิบายชุมนุม"}</div>
+            
+            <div class="seat-progress-container">
+                <div class="seat-label">
+                    <span>สมัครแล้ว <span class="numbers">${club.enrolled_count}/${club.capacity}</span> คน</span>
+                    <span class="percent">${pct}%</span>
+                </div>
+                <div class="progress-bar-bg">
+                    <div class="progress-bar-fill ${pctClass}" style="width: ${pct}%;"></div>
+                </div>
+            </div>
+            
+            <div class="club-footer">
+                ${btnHtml}
+            </div>
+        `;
+        container.appendChild(card);
+    });
+}
+
+function filterClubs() {
+    renderClubsGrid();
+}
+
+function toggleFilterMyGrades() {
+    const checkbox = document.getElementById("my-grades-only");
+    checkbox.checked = !checkbox.checked;
+    state.myGradesFilterOnly = checkbox.checked;
+    
+    if (state.myGradesFilterOnly && !state.currentStudentInfo) {
+        showToast("กรุณากรอกและตรวจสอบเลขประจำตัวนักเรียนของคุณในฟอร์มลงทะเบียนชุมนุมก่อนเพื่อจดจำระดับชั้นจริง!", "info");
+    }
+    
+    renderClubsGrid();
+}
+
+// =====================================================================
+// 📝 5. STUDENT REGISTRATION FLOW (ATOMIC & CONCURRENCY SAFE)
+// =====================================================================
+function openRegistrationModal(clubId) {
+    const club = state.clubs.find(c => c.id === clubId);
+    if (!club) return;
+    
+    state.currentClub = club;
+    
+    // ตั้งชื่อชุมนุมและรายละเอียดในฟอร์ม
+    document.getElementById("modal-club-name").innerText = club.name;
+    document.getElementById("modal-club-teacher").innerHTML = `<i class="fa-solid fa-user-tie"></i> ครูผู้สอน: ${club.teacher}`;
+    document.getElementById("modal-club-location").innerHTML = `<i class="fa-solid fa-location-dot"></i> สถานที่: ${club.location}`;
+    
+    // รีเซ็ตการแสดงผล
+    document.getElementById("student-id-input").value = "";
+    document.getElementById("first-name-input").value = "";
+    document.getElementById("last-name-input").value = "";
+    document.getElementById("level-input").value = "";
+    
+    document.getElementById("verify-alert-box").style.display = "none";
+    document.getElementById("verify-alert-box").className = "verification-alert";
+    document.getElementById("manual-entry-form").classList.remove("active");
+    
+    // สลับหน้าจอเนื้อหาฟอร์มกลับมา (กรณีคราวก่อนแสดงตั๋วสำเร็จ)
+    document.getElementById("modal-form-content").style.display = "block";
+    document.getElementById("modal-success-content").style.display = "none";
+    
+    // เปิดโมดอล
+    document.getElementById("registration-modal").classList.add("active");
+}
+
+function closeRegistrationModal() {
+    document.getElementById("registration-modal").classList.remove("active");
+    state.currentClub = null;
+}
+
+// 🟢 ตรวจสอบเลขนักเรียนกับตาราง students
+async function verifyStudentID() {
+    const idInput = document.getElementById("student-id-input").value.trim();
+    const alertBox = document.getElementById("verify-alert-box");
+    const manualArea = document.getElementById("manual-entry-form");
+    
+    if (!idInput) {
+        showToast("กรุณากรอกเลขประจำตัวนักเรียน", "warning");
+        return;
+    }
+
+    alertBox.style.display = "flex";
+    alertBox.className = "verification-alert verified";
+    alertBox.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> กำลังตรวจสอบสิทธิ์ในระบบ...`;
+    manualArea.classList.remove("active");
+
+    try {
+        const { data, error } = await supabaseClient
+            .from("students")
+            .select("*")
+            .eq("student_id", idInput)
+            .maybeSingle();
+
+        if (error) throw error;
+
+        if (data) {
+            // 🟢 เคสที่ 1: ตรวจพบรายชื่อในระบบ
+            state.currentStudentInfo = data;
+            
+            alertBox.className = "verification-alert verified";
+            alertBox.innerHTML = `
+                <i class="fa-solid fa-circle-check"></i> 
+                <div>
+                    <strong>ยืนยันตัวตนสำเร็จ:</strong> ${data.first_name} ${data.last_name} (${data.level})<br>
+                    <span style="font-size:0.8rem; opacity:0.85;">ข้อมูลถูกต้องตามทะเบียนราษฎร์โรงเรียน สามารถกดลงทะเบียนได้ทันที</span>
+                </div>
+            `;
+            
+            // แอบอัปเดตข้อมูลและเก็บสถานะไว้
+            document.getElementById("first-name-input").value = data.first_name;
+            document.getElementById("last-name-input").value = data.last_name;
+            document.getElementById("level-input").value = data.level;
+            
+            // อัปเดต UI คัดกรองของระดับชั้นนั้นทันทีเพื่อความสะดวก
+            const userGradePrefix = data.level.split('/')[0];
+            document.getElementById("filter-grade").value = userGradePrefix;
+        } else {
+            // 🔵 เคสที่ 2: ไม่พบรายชื่อ (นักเรียนใหม่ / ย้ายคลาส) -> เปิดให้กรอกเอง
+            state.currentStudentInfo = null;
+            
+            alertBox.className = "verification-alert pending";
+            alertBox.innerHTML = `
+                <i class="fa-solid fa-triangle-exclamation"></i> 
+                <div>
+                    <strong>ไม่พบเลขประจำตัวในระบบชั่วคราว:</strong> นักเรียนใหม่อาจจะยังไม่มีชื่อในฐานข้อมูลเดิม<br>
+                    <span style="font-weight:600;">โปรดกรอก ชื่อ-นามสกุล และเลือกห้องเรียนจริงที่แบบฟอร์มด้านล่างเพื่อจองสิทธิ์เข้าชุมนุมนี้ทันที!</span>
+                </div>
+            `;
+            
+            // ล้างข้อมูลฟอร์มเดิมเพื่อความถูกต้อง
+            document.getElementById("first-name-input").value = "";
+            document.getElementById("last-name-input").value = "";
+            document.getElementById("level-input").value = "";
+            
+            // เปิดสวิตช์ฟิลด์กรอกข้อมูล
+            manualArea.classList.add("active");
+        }
+    } catch (e) {
+        console.error("Error verifying ID:", e);
+        alertBox.className = "verification-alert error";
+        alertBox.innerHTML = `<i class="fa-solid fa-circle-xmark"></i> เกิดข้อผิดพลาดทางเทคนิคในการเชื่อมต่อระบบตรวจสอบ`;
+    }
+}
+
+// ⚡ บันทึกการลงทะเบียนอย่างปลอดภัยแบบรองรับ Concurrent 800 คน
+async function submitStudentRegistration() {
+    if (!supabaseClient || !state.currentClub) return;
+
+    const studentId = document.getElementById("student-id-input").value.trim() || null;
+    let firstName = document.getElementById("first-name-input").value.trim();
+    let lastName = document.getElementById("last-name-input").value.trim();
+    let level = document.getElementById("level-input").value;
+
+    const submitBtn = document.getElementById("submit-registration-btn");
+
+    // 1. ตรวจสอบความครบถ้วนของข้อมูล
+    if (!firstName || !lastName || !level) {
+        showToast("กรุณากรอกข้อมูลนักเรียน ชื่อ-นามสกุล และห้องเรียนให้ครบถ้วน", "warning");
+        return;
+    }
+
+    // 2. ตรวจสอบเงื่อนไขระดับชั้น (Frontend Check ก่อนยิงไปตัดที่นั่งจริง)
+    const levelPrefix = level.split('/')[0]; // ดึง "ม.4" จาก "ม.4/1"
+    if (!state.currentClub.grades.includes(levelPrefix)) {
+        showToast(`ขออภัย ชุมนุมนี้ไม่เปิดรับสมัครสำหรับระดับชั้น ${levelPrefix} (รับเฉพาะชั้น: ${state.currentClub.grades.join(', ')})`, "error");
+        return;
+    }
+
+    // 3. ป้องกันการลงสแปมด้วยระบบ Jitter (หน่วงเวลาสุ่ม) เพื่อกระจาย Request หลบ Peak concurrent 
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = `<div class="spinner"></div> กำลังประมวลผลข้อมูลและจองสิทธิ์...`;
+
+    // สุ่มเวลาหน่วง (Jitter) ระหว่าง 400ms - 1500ms
+    const jitterDelay = Math.floor(Math.random() * 1100) + 400;
+    
+    setTimeout(async () => {
+        try {
+            // 4. สั่งเรียก RPC Function register_student_atomic บนฐานข้อมูล Supabase เพื่อตัดที่นั่งแบบปลอดภัย (Row level lock)
+            const { data, error } = await supabaseClient.rpc("register_student_atomic", {
+                p_club_id: state.currentClub.id,
+                p_student_id: studentId,
+                p_first_name: firstName,
+                p_last_name: lastName,
+                p_level: level
+            });
+
+            if (error) throw error;
+
+            if (data && data.success) {
+                // 🎉 ลงทะเบียนเสร็จสิ้น
+                showToast(data.message, "success");
+                
+                // ฉลองด้วย Confetti
+                triggerConfettiCelebration();
+
+                // อัปเดตข้อมูลตั๋ว
+                document.getElementById("ticket-club-name").innerText = state.currentClub.name;
+                document.getElementById("ticket-student-name").innerText = `${firstName} ${lastName}`;
+                document.getElementById("ticket-student-level").innerText = level;
+                document.getElementById("ticket-student-id").innerText = studentId || "นักเรียนใหม่ (รอการจัดเลข)";
+                document.getElementById("ticket-location-teacher").innerHTML = `<i class="fa-solid fa-location-dot"></i> ${state.currentClub.location} &nbsp;&nbsp;&nbsp; <i class="fa-solid fa-user-tie"></i> ${state.currentClub.teacher}`;
+
+                const badge = document.getElementById("ticket-status-badge");
+                if (data.status === 'verified') {
+                    badge.className = "ticket-status-badge verified";
+                    badge.innerText = "ยืนยันแล้ว (เดิม)";
+                } else {
+                    badge.className = "ticket-status-badge pending";
+                    badge.innerText = "สำรองสิทธิ์ (นักเรียนใหม่)";
+                }
+
+                // สลับแสดงตั๋วสำเร็จ
+                document.getElementById("modal-form-content").style.display = "none";
+                document.getElementById("modal-success-content").style.display = "block";
+
+                // รีเฟรชข้อมูลในหน้าเว็บบอร์ดหลังบ้าน
+                loadClubsData();
+            } else {
+                // ได้รับข้อความปฏิเสธจาก Stored procedure (เช่น สมัครซ้ำ หรือ ที่นั่งเต็ม)
+                showToast(data.message || "เกิดข้อผิดพลาดในการรับสมัคร", "error");
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = `<i class="fa-solid fa-signature"></i> ยืนยันสมัครเข้าชุมนุมนี้`;
+            }
+        } catch (e) {
+            console.error("Error submitting registration:", e);
+            showToast("ไม่สามารถประมวลผลคำขอของคุณได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง", "error");
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = `<i class="fa-solid fa-signature"></i> ยืนยันสมัครเข้าชุมนุมนี้`;
+        }
+    }, jitterDelay);
+}
+
+function triggerConfettiCelebration() {
+    confetti({
+        particleCount: 150,
+        spread: 80,
+        origin: { y: 0.65 },
+        colors: ['#10b981', '#34d399', '#059669', '#ffffff']
+    });
+}
+
+// ผูก Event ปุ่ม Enter บน Input ค้นหาต่างๆ เพื่อความสะดวกในการใช้งาน
+function handleVerifyIdKeyPress(event) {
+    if (event.key === "Enter") {
+        verifyStudentID();
+    }
+}
+
+// =====================================================================
+// 📝 6. REGISTRATIONS SEARCH TAB (FRONTEND)
+// =====================================================================
+async function searchStudentRegistrations() {
+    const term = document.getElementById("reg-search-input").value.trim();
+    const resultsContainer = document.getElementById("reg-search-results-container");
+    const resultsBody = document.getElementById("reg-search-results-body");
+    const emptyState = document.getElementById("reg-search-empty-state");
+
+    if (!term) {
+        showToast("กรุณากรอกคำที่ต้องการค้นหา", "warning");
+        return;
+    }
+
+    resultsContainer.style.display = "none";
+    emptyState.style.display = "block";
+    emptyState.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin" style="font-size:2.5rem; color:var(--accent-mint); margin-bottom:1rem;"></i><p>กำลังค้นหาข้อมูลการลงทะเบียน...</p>`;
+
+    try {
+        // ดึงการลงทะเบียนของเด็กพร้อมชื่อชุมนุม
+        const { data, error } = await supabaseClient
+            .from("registrations")
+            .select(`
+                *,
+                clubs ( name, teacher )
+            `)
+            .or(`student_id.eq.${term},first_name.ilike.%${term}%,last_name.ilike.%${term}%`);
+
+        if (error) throw error;
+
+        if (data && data.length > 0) {
+            resultsBody.innerHTML = "";
+            data.forEach(reg => {
+                const date = new Date(reg.created_at).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" });
+                const statusBadge = reg.registration_status === 'verified' 
+                    ? `<span class="ticket-status-badge verified" style="font-size:0.75rem;">ยืนยันสิทธิ์แล้ว</span>`
+                    : `<span class="ticket-status-badge pending" style="font-size:0.75rem;">สำรองสิทธิ์ (Pending)</span>`;
+
+                const row = document.createElement("tr");
+                row.innerHTML = `
+                    <td><strong>${reg.student_id || "นักเรียนใหม่"}</strong></td>
+                    <td>${reg.first_name} ${reg.last_name}</td>
+                    <td>${reg.level}</td>
+                    <td style="color:var(--accent-mint); font-weight:600;">${reg.clubs ? reg.clubs.name : "ไม่ระบุ"}</td>
+                    <td>${reg.clubs ? reg.clubs.teacher : "ไม่ระบุ"}</td>
+                    <td>${statusBadge}</td>
+                    <td style="font-size:0.85rem; color:var(--text-secondary);">${date} น.</td>
+                `;
+                resultsBody.appendChild(row);
+            });
+
+            emptyState.style.display = "none";
+            resultsContainer.style.display = "block";
+        } else {
+            emptyState.style.display = "block";
+            emptyState.innerHTML = `
+                <i class="fa-regular fa-face-frown" style="font-size: 3rem; color: var(--text-muted); margin-bottom: 1rem;"></i>
+                <p>ไม่พบประวัติการลงทะเบียนสำหรับ "${term}"</p>
+            `;
+        }
+    } catch (e) {
+        console.error("Error searching registrations:", e);
+        showToast("เกิดข้อผิดพลาดในการตรวจสอบรายชื่อลงทะเบียน", "error");
+        emptyState.style.display = "block";
+        emptyState.innerHTML = `<p>เกิดข้อผิดพลาดทางเทคนิคในการเรียกฐานข้อมูล</p>`;
+    }
+}
+
+function handleSearchRegKeyPress(event) {
+    if (event.key === "Enter") {
+        searchStudentRegistrations();
+    }
+}
+
+// =====================================================================
+// ⚙️ 7. ADMIN DASHBOARD & CONTROL SYSTEM
+// =====================================================================
+function attemptAdminLogin() {
+    const entered = document.getElementById("admin-passcode-input").value;
+    const config = state.settings.school_config || {};
+    
+    if (entered === (config.admin_password || "admin-password-1234")) {
+        state.isAdminLoggedIn = true;
+        document.getElementById("admin-login-area").style.display = "none";
+        document.getElementById("admin-dashboard-area").style.display = "grid";
+        
+        loadAdminDashboardData();
+        showToast("ยินดีต้อนรับผู้บริหารระดับโรงเรียน เข้าสู่ระบบควบคุมสำเร็จรูป", "success");
+    } else {
+        showToast("รหัสผ่านควบคุมไม่ถูกต้อง กรุณาตรวจสอบรหัสผ่านอีกครั้ง", "error");
+    }
+}
+
+function handleAdminLoginKeyPress(event) {
+    if (event.key === "Enter") {
+        attemptAdminLogin();
+    }
+}
+
+function adminLogout() {
+    state.isAdminLoggedIn = false;
+    document.getElementById("admin-passcode-input").value = "";
+    document.getElementById("admin-dashboard-area").style.display = "none";
+    document.getElementById("admin-login-area").style.display = "block";
+    showToast("ออกจากระบบหลังบ้านเรียบร้อยแล้ว", "info");
+}
+
+function switchAdminSubTab(subTabId) {
+    state.activeAdminSubTab = subTabId;
+    
+    // เปลี่ยนสถานะปุ่มเมนู
+    document.querySelectorAll(".admin-tab-btn").forEach(btn => btn.classList.remove("active"));
+    document.getElementById(`admin-menu-${subTabId}`).classList.add("active");
+
+    // สลับพื้นที่เนื้อหาย่อย
+    document.querySelectorAll(".admin-sub-view").forEach(view => view.style.display = "none");
+    document.getElementById(`admin-sub-${subTabId}`).style.display = "block";
+
+    loadAdminDashboardData();
+}
+
+// โหลดข้อมูลรายงานและตารางสิทธิ์ต่างๆ ทั้งหมดมาเก็บไว้ที่ State
+async function loadAdminDashboardData() {
+    if (!supabaseClient || !state.isAdminLoggedIn) return;
+
+    try {
+        // ดึงการลงทะเบียนทั้งหมดพร้อมข้อมูลความสัมพันธ์
+        const { data: regs, error: errRegs } = await supabaseClient
+            .from("registrations")
+            .select(`
+                *,
+                clubs ( name, teacher, location )
+            `)
+            .order("created_at", { ascending: false });
+
+        if (errRegs) throw errRegs;
+        state.registrations = regs || [];
+
+        // อัปเดต Badge แจ้งเตือนยอดเด็กใหม่รอยืนยันสิทธิ์
+        const pendingsCount = state.registrations.filter(r => r.registration_status === 'pending').length;
+        document.getElementById("admin-pending-badge").innerText = pendingsCount;
+
+        // นำไปเรนเดอร์ย่อยตามแท็บ
+        if (state.activeAdminSubTab === 'stats') {
+            renderAdminStats();
+        } else if (state.activeAdminSubTab === 'pending') {
+            renderAdminPendingStudents();
+        } else if (state.activeAdminSubTab === 'clubs') {
+            renderAdminManageClubs();
+        } else if (state.activeAdminSubTab === 'students') {
+            loadStudentsList();
+        } else if (state.activeAdminSubTab === 'settings') {
+            renderAdminSettings();
+        }
+    } catch (e) {
+        console.error("Error loading admin dashboard data:", e);
+        showToast("ไม่สามารถเรียกข้อมูลสิทธิ์การจัดการระบบได้", "error");
+    }
+}
+
+// 📊 Render หน้ารายงานสรุปผล
+function renderAdminStats() {
+    // 1. คำนวณภาพรวมสถิติ
+    const totalClubs = state.clubs.length;
+    let totalSeats = 0;
+    state.clubs.forEach(c => totalSeats += c.capacity);
+
+    const totalEnrolled = state.registrations.length;
+    const totalVerified = state.registrations.filter(r => r.registration_status === 'verified').length;
+    const totalPending = state.registrations.filter(r => r.registration_status === 'pending').length;
+
+    document.getElementById("stat-total-clubs").innerText = totalClubs;
+    document.getElementById("stat-total-seats").innerText = totalSeats;
+    document.getElementById("stat-total-enrolled").innerText = totalVerified;
+    document.getElementById("stat-total-pending").innerText = totalPending;
+
+    // 2. เติมข้อมูลลงในตารางสถิติแยกตามชุมนุม
+    const tbody = document.getElementById("admin-stats-clubs-tbody");
+    tbody.innerHTML = "";
+
+    state.clubs.forEach(club => {
+        const clubRegs = state.registrations.filter(r => r.club_id === club.id);
+        const verifiedCount = clubRegs.filter(r => r.registration_status === 'verified').length;
+        const pendingCount = clubRegs.filter(r => r.registration_status === 'pending').length;
+        const totalCount = clubRegs.length;
+        
+        const densityPct = Math.round((totalCount / club.capacity) * 100);
+
+        const row = document.createElement("tr");
+        row.innerHTML = `
+            <td><strong>${club.name}</strong></td>
+            <td>${club.teacher}</td>
+            <td><div class="grade-badges">${club.grades.map(g=>`<span class="grade-badge" style="font-size:0.65rem;">${g}</span>`).join('')}</div></td>
+            <td>${club.capacity} ที่นั่ง</td>
+            <td>
+                <strong>${totalCount}</strong> คน 
+                <span style="font-size:0.8rem; color:var(--text-muted);">(${verifiedCount} เดิม / ${pendingCount} ใหม่)</span>
+            </td>
+            <td>
+                <span style="font-weight:700; color: ${densityPct >= 100 ? 'var(--status-danger)' : densityPct >= 70 ? 'var(--status-warning)' : 'var(--accent-mint)'};">
+                    ${densityPct}%
+                </span>
+            </td>
+            <td>
+                <button class="btn-small-success" onclick="exportSingleClubToCSV('${club.id}', '${club.name}')">
+                    <i class="fa-solid fa-download"></i> รายชื่อ
+                </button>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+// ⏳ Render หน้าจัดการยืนยันเด็กใหม่ (Pending Students)
+function renderAdminPendingStudents() {
+    const tbody = document.getElementById("admin-pending-students-tbody");
+    tbody.innerHTML = "";
+
+    const pendings = state.registrations.filter(r => r.registration_status === 'pending');
+
+    if (pendings.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 3rem 0;">
+                    <i class="fa-solid fa-circle-check" style="font-size: 2.5rem; color: var(--accent-mint); margin-bottom: 1rem;"></i>
+                    <p>ไม่มีรายชื่อนักเรียนใหม่ที่ต้องยืนยันตัวตนในขณะนี้ สบายใจได้!</p>
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    pendings.forEach(reg => {
+        const date = new Date(reg.created_at).toLocaleDateString("th-TH") + " " + new Date(reg.created_at).toLocaleTimeString("th-TH", {hour: '2-digit', minute:'2-digit'});
+        const clubName = reg.clubs ? reg.clubs.name : "ไม่พบประวัติ";
+
+        const row = document.createElement("tr");
+        row.innerHTML = `
+            <td><strong>${reg.first_name} ${reg.last_name}</strong></td>
+            <td>${reg.level}</td>
+            <td style="color:var(--accent-mint); font-weight:600;">${clubName}</td>
+            <td>
+                <input type="text" value="${reg.student_id || ''}" placeholder="กรอกเลขนักเรียน 5 หลัก..." 
+                       id="pending-id-input-${reg.id}" 
+                       style="background:rgba(7,23,15,0.7); border:var(--border-glass); color:var(--text-primary); padding:6px 10px; border-radius:4px; font-size:0.85rem; width:140px;">
+            </td>
+            <td style="font-size:0.82rem; color:var(--text-secondary);">${date}</td>
+            <td style="display:flex; gap:8px;">
+                <button class="btn-small-success" onclick="approvePendingRegistration('${reg.id}')">
+                    <i class="fa-solid fa-check"></i> อนุมัติสิทธิ์
+                </button>
+                <button class="btn-small-danger" onclick="cancelPendingRegistration('${reg.id}', '${reg.club_id}')">
+                    <i class="fa-solid fa-trash-can"></i> ยกเลิก
+                </button>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+// 🟢 อนุมัติข้อมูลเด็กใหม่
+async function approvePendingRegistration(regId) {
+    if (!supabaseClient) return;
+    const stdIdVal = document.getElementById(`pending-id-input-${regId}`).value.trim();
+
+    if (!stdIdVal) {
+        showToast("กรุณากรอกเลขประจำตัวนักเรียนจริงเพื่อใช้อ้างอิงการบันทึกสิทธิ์ก่อนยืนยันอนุมัติ", "warning");
+        return;
+    }
+
+    try {
+        const { data, error } = await supabaseClient
+            .from("registrations")
+            .update({
+                student_id: stdIdVal,
+                registration_status: "verified"
+            })
+            .eq("id", regId)
+            .select();
+
+        if (error) throw error;
+
+        showToast("ยืนยันคุณสมบัติการเลือกเรียนชุมนุมของนักเรียนสำเร็จแล้ว", "success");
+        loadAdminDashboardData();
+    } catch (e) {
+        console.error("Error approving pending:", e);
+        showToast("เกิดข้อผิดพลาดในการบันทึกข้อมูล", "error");
+    }
+}
+
+// 🔴 ยกเลิก/ลบสิทธิ์สมัคร และคืนโควตาที่นั่งให้บอร์ด
+async function cancelPendingRegistration(regId, clubId) {
+    if (!supabaseClient) return;
+    if (!confirm("คุณแน่ใจใช่หรือไม่ว่าต้องการยกเลิกและทำลายคำร้องจองสิทธิ์ของนักเรียนคนนี้? (ระบบจะคืนที่นั่งกลับชุมนุมทันที)")) return;
+
+    try {
+        // 1. ลบประวัติการสมัครในทะเบียน
+        const { error: errDel } = await supabaseClient
+            .from("registrations")
+            .delete()
+            .eq("id", regId);
+
+        if (errDel) throw errDel;
+
+        // 2. คืนที่นั่ง (หักยอด enrolled_count ออก 1)
+        const { error: errUp } = await supabaseClient
+            .rpc("decrement_club_seats", { p_club_id: clubId });
+            
+        // กรณีไม่มี RPC เฉพาะกิจ สามารถรัน update ตรงๆ แบบ concurrency อิสระได้
+        if (errUp) {
+            // fallback หากยังไม่ได้รันตัว decrement
+            const targetClub = state.clubs.find(c => c.id === clubId);
+            if (targetClub) {
+                const newEnrolled = Math.max(0, targetClub.enrolled_count - 1);
+                await supabaseClient
+                    .from("clubs")
+                    .update({ enrolled_count: newEnrolled })
+                    .eq("id", clubId);
+            }
+        }
+
+        showToast("ยกเลิกและคืนโควตาชุมนุมเสร็จสิ้นแล้ว", "info");
+        
+        // โหลดข้อมูลใหม่ทั้งหมด
+        await loadClubsData();
+        loadAdminDashboardData();
+    } catch (e) {
+        console.error("Error cancelling pending registration:", e);
+        showToast("เกิดข้อผิดพลาดในการยกเลิกรายการ", "error");
+    }
+}
+
+// 🏫 Render หน้าตั้งค่าตารางจัดชุมนุม
+function renderAdminManageClubs() {
+    const tbody = document.getElementById("admin-manage-clubs-tbody");
+    tbody.innerHTML = "";
+
+    state.clubs.forEach(club => {
+        const row = document.createElement("tr");
+        row.innerHTML = `
+            <td><strong>${club.name}</strong></td>
+            <td>${club.teacher}</td>
+            <td>${club.location}</td>
+            <td><div class="grade-badges">${club.grades.map(g=>`<span class="grade-badge" style="font-size:0.65rem;">${g}</span>`).join('')}</div></td>
+            <td><strong>${club.enrolled_count} / ${club.capacity}</strong></td>
+            <td style="font-size:0.8rem; color:var(--text-secondary); max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${club.description || "-"}</td>
+            <td>
+                <div style="display:flex; gap:8px;">
+                    <button class="btn-small-success" style="background:#0284c7; border-color:#38bdf8;" onclick="openClubFormModal('${club.id}')">
+                        <i class="fa-solid fa-edit"></i>
+                    </button>
+                    <button class="btn-small-danger" onclick="deleteClub('${club.id}', '${club.name}')">
+                        <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                </div>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+// ➕ เปิด-ปิด ฟอร์มเพิ่ม/แก้ไขชุมนุม
+function openClubFormModal(clubId = null) {
+    const modal = document.getElementById("club-form-modal");
+    
+    // เคลียร์ค่าเริ่มต้นกล่อง checkbox ของระดับชั้น
+    document.querySelectorAll("#club-form-grades-container input[type='checkbox']").forEach(cb => cb.checked = false);
+
+    if (clubId) {
+        // โหมดแก้ไข
+        const club = state.clubs.find(c => c.id === clubId);
+        if (!club) return;
+        
+        document.getElementById("club-form-title").innerText = "แก้ไขข้อมูลชุมนุม";
+        document.getElementById("club-form-id").value = club.id;
+        document.getElementById("club-form-name").value = club.name;
+        document.getElementById("club-form-teacher").value = club.teacher;
+        document.getElementById("club-form-location").value = club.location;
+        document.getElementById("club-form-capacity").value = club.capacity;
+        document.getElementById("club-form-description").value = club.description || "";
+        
+        // ติ๊กเลือกช่วงชั้นที่เปิดรับเดิม
+        club.grades.forEach(g => {
+            const cb = document.querySelector(`#club-form-grades-container input[value='${g}']`);
+            if (cb) cb.checked = true;
+        });
+    } else {
+        // โหมดสร้างใหม่
+        document.getElementById("club-form-title").innerText = "เพิ่มข้อมูลชุมนุมใหม่";
+        document.getElementById("club-form-id").value = "";
+        document.getElementById("club-form-name").value = "";
+        document.getElementById("club-form-teacher").value = "";
+        document.getElementById("club-form-location").value = "";
+        document.getElementById("club-form-capacity").value = "40";
+        document.getElementById("club-form-description").value = "";
+        
+        // ติ๊กเลือกทั้งหมด
+        document.querySelectorAll("#club-form-grades-container input[type='checkbox']").forEach(cb => cb.checked = true);
+    }
+
+    modal.classList.add("active");
+}
+
+function closeClubFormModal() {
+    document.getElementById("club-form-modal").classList.remove("active");
+}
+
+// บันทึก/อัปเดตข้อมูลชุมนุม
+async function saveClubForm() {
+    if (!supabaseClient) return;
+
+    const clubId = document.getElementById("club-form-id").value;
+    const name = document.getElementById("club-form-name").value.trim();
+    const teacher = document.getElementById("club-form-teacher").value.trim();
+    const location = document.getElementById("club-form-location").value.trim();
+    const capacity = parseInt(document.getElementById("club-form-capacity").value) || 0;
+    const description = document.getElementById("club-form-description").value.trim();
+
+    // ดึงระดับชั้นที่เช็ค
+    const grades = [];
+    document.querySelectorAll("#club-form-grades-container input[type='checkbox']:checked").forEach(cb => {
+        grades.push(cb.value);
+    });
+
+    if (!name || !teacher || !location || capacity <= 0 || grades.length === 0) {
+        showToast("กรุณากรอกข้อมูลชุมนุมและรายละเอียดที่นั่ง/ระดับชั้นที่ต้องการให้ครบถ้วน", "warning");
+        return;
+    }
+
+    const payload = {
+        name,
+        teacher,
+        location,
+        capacity,
+        description,
+        grades
+    };
+
+    try {
+        if (clubId) {
+            // โหมดแก้ไข
+            const { error } = await supabaseClient
+                .from("clubs")
+                .update(payload)
+                .eq("id", clubId);
+
+            if (error) throw error;
+            showToast("อัปเดตข้อมูลชุมนุมเรียบร้อยแล้ว", "success");
+        } else {
+            // โหมดเพิ่มใหม่
+            const { error } = await supabaseClient
+                .from("clubs")
+                .insert([{ ...payload, enrolled_count: 0 }]);
+
+            if (error) throw error;
+            showToast("สร้างชุมนุมวิชาการเรียนรู้ใหม่ในระบบเรียบร้อยแล้ว", "success");
+        }
+
+        closeClubFormModal();
+        
+        // อัปเดตข้อมูล UI หลัก
+        await loadClubsData();
+        loadAdminDashboardData();
+    } catch (e) {
+        console.error("Error saving club:", e);
+        showToast("เกิดข้อผิดพลาดในการบันทึกข้อมูลชุมนุม", "error");
+    }
+}
+
+// ลบชุมนุมออก
+async function deleteClub(clubId, clubName) {
+    if (!supabaseClient) return;
+    if (!confirm(`คุณแน่ใจใช่หรือไม่ว่าต้องการลบชุมนุม "${clubName}" ออกจากระบบ? (ประวัติการสมัครของเด็กในชุมนุมนี้ทั้งหมดจะถูกลบตามไปด้วยทันที!)`)) return;
+
+    try {
+        const { error } = await supabaseClient
+            .from("clubs")
+            .delete()
+            .eq("id", clubId);
+
+        if (error) throw error;
+
+        showToast("ลบข้อมูลชุมนุมเสร็จสิ้นแล้ว", "info");
+        await loadClubsData();
+        loadAdminDashboardData();
+    } catch (e) {
+        console.error("Error deleting club:", e);
+        showToast("เกิดข้อผิดพลาดทางเทคนิคในการลบ", "error");
+    }
+}
+
+// 👥 ดึงรายชื่อนักเรียนที่มีในระบบ (สำหรับ bulk import)
+async function loadStudentsList() {
+    if (!supabaseClient) return;
+    const tbody = document.getElementById("admin-students-list-tbody");
+    
+    try {
+        const { data, error } = await supabaseClient
+            .from("students")
+            .select("*")
+            .order("student_id", { ascending: true })
+            .limit(100); // ดึงมาพรีวิว 100 แถวแรก
+
+        if (error) throw error;
+
+        tbody.innerHTML = "";
+        if (data && data.length > 0) {
+            data.forEach(std => {
+                const row = document.createElement("tr");
+                row.innerHTML = `
+                    <td><strong>${std.student_id}</strong></td>
+                    <td>${std.first_name}</td>
+                    <td>${std.last_name}</td>
+                    <td>${std.level}</td>
+                `;
+                tbody.appendChild(row);
+            });
+        } else {
+            tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-muted);">ไม่มีข้อมูลนักเรียนในระบบ กรุณานำเข้าผ่าน CSV ด้านบน</td></tr>`;
+        }
+    } catch (e) {
+        console.error("Error loading students list:", e);
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--status-danger);">ไม่สามารถดาวน์โหลดรายชื่อจากฐานข้อมูลได้</td></tr>`;
+    }
+}
+
+// 🟢 อัปโหลดรายชื่อเด็ก bulk import ผ่านหน้าบ้าน CSV
+async function handleStudentCSVImport(event) {
+    if (!supabaseClient) return;
+    const file = event.target.files[0];
+    if (!file) return;
+
+    showToast("กำลังเริ่มวิเคราะห์ไฟล์รายชื่อนักเรียน...", "info");
+
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+        const content = e.target.result;
+        const lines = content.split(/\r?\n/);
+        const batch = [];
+
+        // สมมติโครงสร้างหัวตาราง CSV: student_id, first_name, last_name, level
+        // วนลูปอ่านข้อมูลข้ามแถวแรก (Headers)
+        for (let i = 1; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+
+            // จัดการ Split comma โดยหลบเว้นวรรค
+            const cols = line.split(",").map(val => val.trim().replace(/^["']|["']$/g, ""));
+            
+            if (cols.length >= 4) {
+                batch.push({
+                    student_id: cols[0],
+                    first_name: cols[1],
+                    last_name: cols[2],
+                    level: cols[3]
+                });
+            }
+        }
+
+        if (batch.length === 0) {
+            showToast("โครงสร้างไฟล์ CSV ไม่ถูกต้อง หรือไม่มีแถวข้อมูลที่สามารถนำเข้าได้", "error");
+            return;
+        }
+
+        showToast(`กำลังส่งข้อมูลจำนวน ${batch.length} คน เข้าสู่ระบบฐานข้อมูล...`, "info");
+
+        try {
+            // อัปเดตเข้ารายชื่อ (ใช้ Upsert เพื่อทับรายชื่อเดิมหากเลขซ้ำ)
+            const { error } = await supabaseClient
+                .from("students")
+                .upsert(batch, { onConflict: 'student_id' });
+
+            if (error) throw error;
+
+            showToast(`นำเข้าฐานข้อมูลรายชื่อนักเรียนสำเร็จรวม ${batch.length} รายการ!`, "success");
+            loadStudentsList();
+        } catch (err) {
+            console.error("Error importing bulk data:", err);
+            showToast("เกิดข้อผิดพลาดในการ Bulk อัปเดตรายชื่อเด็กสู่ Supabase", "error");
+        }
+    };
+    
+    reader.readAsText(file, "UTF-8");
+}
+
+// ⚙️ Render ข้อมูลหน้าตั้งค่าระบบ
+function renderAdminSettings() {
+    const config = state.settings.school_config || {};
+    const period = state.settings.registration_period || {};
+
+    document.getElementById("admin-settings-school-name").value = config.school_name || "";
+    document.getElementById("admin-settings-semester").value = config.semester || "";
+    document.getElementById("admin-settings-admin-password").value = config.admin_password || "";
+
+    const activeCheckbox = document.getElementById("admin-settings-is-active");
+    activeCheckbox.checked = period.is_active;
+    document.getElementById("admin-settings-status-label").innerText = period.is_active ? "เปิดระบบรับสมัครจริง" : "ปิดระบบรับสมัคร";
+
+    // ตั้งค่ากล่องวันเวลา (แปลง ISO เป็น Format สำหรับ datetime-local: YYYY-MM-DDTHH:MM)
+    if (period.start_time) {
+        document.getElementById("admin-settings-start-time").value = formatISOToLocalInput(period.start_time);
+    }
+    if (period.end_time) {
+        document.getElementById("admin-settings-end-time").value = formatISOToLocalInput(period.end_time);
+    }
+}
+
+function formatISOToLocalInput(isoString) {
+    const date = new Date(isoString);
+    const tzOffset = date.getTimezoneOffset() * 60000; // แปลงส่วนต่างโซนเวลา
+    const localISOTime = (new Date(date.getTime() - tzOffset)).toISOString().slice(0, 16);
+    return localISOTime;
+}
+
+function toggleRegistrationState() {
+    const cb = document.getElementById("admin-settings-is-active");
+    cb.checked = !cb.checked;
+    document.getElementById("admin-settings-status-label").innerText = cb.checked ? "เปิดระบบรับสมัครจริง" : "ปิดระบบรับสมัคร";
+}
+
+async function saveSystemSettings() {
+    if (!supabaseClient) return;
+
+    const schoolName = document.getElementById("admin-settings-school-name").value.trim();
+    const semester = document.getElementById("admin-settings-semester").value.trim();
+    const adminPassword = document.getElementById("admin-settings-admin-password").value.trim();
+
+    const is_active = document.getElementById("admin-settings-is-active").checked;
+    const start_time = document.getElementById("admin-settings-start-time").value;
+    const end_time = document.getElementById("admin-settings-end-time").value;
+
+    if (!schoolName || !semester || !adminPassword) {
+        showToast("กรุณากรอกข้อมูลตั้งค่าหลักให้ครบถ้วน (ชื่อ, เทอม, รหัสผ่านใหม่)", "warning");
+        return;
+    }
+
+    const payloadConfig = {
+        school_name: schoolName,
+        semester,
+        admin_password: adminPassword
+    };
+
+    const payloadPeriod = {
+        is_active,
+        start_time: start_time ? new Date(start_time).toISOString() : null,
+        end_time: end_time ? new Date(end_time).toISOString() : null
+    };
+
+    try {
+        // อัปเดตข้อมูลลง Supabase แบบขนาน
+        const updateConf = supabaseClient.from("settings").update({ value: payloadConfig }).eq("key", "school_config");
+        const updatePeriod = supabaseClient.from("settings").update({ value: payloadPeriod }).eq("key", "registration_period");
+
+        const [res1, res2] = await Promise.all([updateConf, updatePeriod]);
+
+        if (res1.error) throw res1.error;
+        if (res2.error) throw res2.error;
+
+        showToast("บันทึกการปรับแต่งตั้งค่าโครงสร้างระบบเรียบร้อยแล้ว", "success");
+        
+        // อัปโหลดข้อมูลสถานะเก็บเข้าตัวแปรหลัก
+        state.settings.school_config = payloadConfig;
+        state.settings.registration_period = payloadPeriod;
+        
+        updateSystemUI();
+    } catch (e) {
+        console.error("Error saving settings:", e);
+        showToast("เกิดข้อผิดพลาดในการเซฟข้อมูลเข้าระบบ", "error");
+    }
+}
+
+// =====================================================================
+// 📊 8. EXPORT CSV FOR THAI EXCEL (UTF-8 WITH BOM)
+// =====================================================================
+function exportAllRegistrationsToCSV() {
+    if (state.registrations.length === 0) {
+        showToast("ไม่มีข้อมูลประวัติผู้สมัครที่สามารถส่งออกได้ในขณะนี้", "warning");
+        return;
+    }
+
+    // สร้าง Header ภาษาไทย
+    let csvContent = "เลขประจำตัวนักเรียน,ชื่อ,นามสกุล,ระดับชั้น/ห้อง,สถานะสิทธิ์,ชุมนุมที่เลือกเรียน,ครูผู้สอน,สถานที่เรียน,วันเวลาลงทะเบียน\n";
+
+    state.registrations.forEach(r => {
+        const studentId = r.student_id || "นักเรียนใหม่";
+        const status = r.registration_status === 'verified' ? 'ยืนยันตัวตนสำเร็จ' : 'สำรองสิทธิ์ (Pending)';
+        const date = new Date(r.created_at).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" }).replace(",", "");
+        const clubName = r.clubs ? r.clubs.name : "ไม่ระบุ";
+        const teacherName = r.clubs ? r.clubs.teacher : "ไม่ระบุ";
+        const loc = r.clubs ? r.clubs.location : "ไม่ระบุ";
+
+        csvContent += `"${studentId}","${r.first_name}","${r.last_name}","${r.level}","${status}","${clubName}","${teacherName}","${loc}","${date}"\n`;
+    });
+
+    downloadCSVFile(csvContent, `รายงานการลงทะเบียนชุมนุมทั้งหมด_${state.settings.school_config.semester.replace('/', '-')}.csv`);
+}
+
+function exportSingleClubToCSV(clubId, clubName) {
+    const clubRegs = state.registrations.filter(r => r.club_id === clubId);
+
+    if (clubRegs.length === 0) {
+        showToast(`ชุมนุม "${clubName}" ยังไม่มีผู้ลงทะเบียนเรียนในขณะนี้`, "warning");
+        return;
+    }
+
+    let csvContent = "เลขประจำตัวนักเรียน,ชื่อ,นามสกุล,ระดับชั้น/ห้อง,สถานะสิทธิ์,วันเวลาลงทะเบียน\n";
+
+    clubRegs.forEach(r => {
+        const studentId = r.student_id || "นักเรียนใหม่";
+        const status = r.registration_status === 'verified' ? 'ยืนยันตัวตนสำเร็จ' : 'สำรองสิทธิ์ (Pending)';
+        const date = new Date(r.created_at).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" }).replace(",", "");
+
+        csvContent += `"${studentId}","${r.first_name}","${r.last_name}","${r.level}","${status}","${date}"\n`;
+    });
+
+    downloadCSVFile(csvContent, `รายชื่อชุมนุม_${clubName}.csv`);
+}
+
+function downloadCSVFile(content, fileName) {
+    // 💡 สำคัญ: ใส่ Byte Order Mark (BOM) เพื่อให้ Excel เปิดภาษาไทยได้โดยไม่เพี้ยนหรืออ่านไม่ออก!
+    const BOM = "\uFEFF";
+    const blob = new Blob([BOM + content], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    
+    if (navigator.msSaveBlob) { // IE 10+
+        navigator.msSaveBlob(blob, fileName);
+    } else {
+        const url = URL.createObjectURL(blob);
+        link.setAttribute("href", url);
+        link.setAttribute("download", fileName);
+        link.style.visibility = "hidden";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+    
+    showToast("สร้างไฟล์ดาวน์โหลดและส่งออกข้อมูลสำเร็จ", "success");
+}
+
+// =====================================================================
+// 📧 9. VISUAL TOAST NOTIFICATIONS
+// =====================================================================
+function showToast(message, type = "info") {
+    const toast = document.getElementById("toast-notify");
+    const icon = document.getElementById("toast-icon");
+    const msg = document.getElementById("toast-message");
+
+    msg.innerText = message;
+    toast.className = `toast-notification ${type} active`;
+
+    // เลือกเปลี่ยนรูปไอคอนให้เข้ากับสถานะ
+    if (type === "success") {
+        icon.className = "fa-solid fa-circle-check";
+    } else if (type === "error") {
+        icon.className = "fa-solid fa-circle-exclamation";
+    } else if (type === "warning") {
+        icon.className = "fa-solid fa-triangle-exclamation";
+    } else {
+        icon.className = "fa-solid fa-circle-info";
+    }
+
+    // ซ่อนแบนเนอร์หลังผ่านไป 3.5 วินาที
+    setTimeout(() => {
+        toast.classList.remove("active");
+    }, 3500);
+}
