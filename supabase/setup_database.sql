@@ -213,6 +213,8 @@ EXCEPTION WHEN OTHERS THEN
     -- เกิดข้อผิดพลาด ปลดการทำงานและ Rollback อัตโนมัติ
     RETURN jsonb_build_object('success', false, 'message', 'เกิดข้อผิดพลาดในการประมวลผล กรุณาลองใหม่อีกครั้ง (' || SQLERRM || ')');
 END;
+$$;
+
 -- ฟังก์ชันลดจำนวนผู้สมัครในชุมนุมเมื่อผู้ดูแลระบบยกเลิกสิทธิ์จอง (Atomic Decrement)
 CREATE OR REPLACE FUNCTION decrement_club_seats(
     p_club_id UUID
