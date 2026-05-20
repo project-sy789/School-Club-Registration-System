@@ -198,7 +198,7 @@ nav {
     padding: 2.5rem 3rem;
     border-radius: var(--border-radius-lg);
     display: grid;
-    grid-template-columns: 1fr 380px;
+    grid-template-columns: 1fr 340px;
     gap: 2.5rem;
     align-items: center;
     position: relative;
@@ -249,6 +249,19 @@ nav {
     gap: 10px;
     backdrop-filter: blur(12px);
     box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+    overflow: hidden;
+    box-sizing: border-box;
+}
+
+.identity-card input,
+.identity-card select,
+.identity-card button {
+    box-sizing: border-box;
+    min-width: 0;
+}
+
+.identity-card div {
+    min-width: 0;
 }
 
 .identity-card-header {
