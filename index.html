@@ -7,7 +7,7 @@
     <meta name="description" content="ระบบสมัครเรียนและลงทะเบียนชุมนุมสำหรับนักเรียนระดับมัธยมศึกษาตอนต้นและตอนปลาย รองรับผู้เข้าใช้งานหนาแน่นอย่างรวดเร็วและปลอดภัย พร้อมระบบสำรองสิทธิ์สำหรับนักเรียนใหม่">
     
     <!-- 🎨 CSS Stylesheets & Icons -->
-    <link rel="stylesheet" href="style.css?v=1.1.8">
+    <link rel="stylesheet" href="style.css?v=1.2.2">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
     <!-- 🚀 External Libraries (Supabase and Confetti) via CDN -->
@@ -160,6 +160,10 @@
                 </div>
                 
                 <div class="registrations-search-bar">
+                    <select id="reg-term-filter" onchange="handleClubSelectChange(event)" style="background: rgba(7, 23, 15, 0.6); border: var(--border-glass); color: var(--text-primary); padding: 12px 18px; border-radius: var(--border-radius-sm); font-size: 1rem; outline: none; cursor: pointer; min-width: 180px;">
+                        <option value="__current__" style="background: #0d281a; color: var(--text-primary);">-- เทอมปัจจุบัน --</option>
+                        <option value="__all__" style="background: #0d281a; color: var(--text-primary);">ทุกเทอม (ประวัติทั้งหมด)</option>
+                    </select>
                     <select id="reg-club-select" onchange="handleClubSelectChange(event)" style="background: rgba(7, 23, 15, 0.6); border: var(--border-glass); color: var(--text-primary); padding: 12px 18px; border-radius: var(--border-radius-sm); font-size: 1rem; outline: none; cursor: pointer; min-width: 250px;">
                         <option value="" style="background: #0d281a; color: var(--text-primary);">-- เลือกจากรายชื่อชุมนุม --</option>
                     </select>
@@ -542,8 +546,16 @@
                             </div>
 
                             <div class="input-group">
-                                <label for="admin-settings-semester">ภาคเรียน / ปีการศึกษา</label>
-                                <input type="text" id="admin-settings-semester" placeholder="เช่น 1/2569">
+                                <label for="admin-settings-academic-year">ปีการศึกษา</label>
+                                <input type="text" id="admin-settings-academic-year" placeholder="เช่น 2569">
+                            </div>
+
+                            <div class="input-group">
+                                <label for="admin-settings-semester">ภาคเรียน</label>
+                                <select id="admin-settings-semester">
+                                    <option value="1">ภาคเรียนที่ 1</option>
+                                    <option value="2">ภาคเรียนที่ 2</option>
+                                </select>
                             </div>
 
                             <div class="input-group">
@@ -565,6 +577,68 @@
                         <button class="btn-primary" style="margin-top: 2rem;" onclick="saveSystemSettings()">
                             <i class="fa-solid fa-floppy-disk"></i> บันทึกการตั้งค่าระบบ
                         </button>
+
+                        <!-- 🚀 การจัดการประจำปีการศึกษา -->
+                        <div style="margin-top: 3rem; padding: 1.5rem; border: 1px solid rgba(255, 165, 0, 0.3); border-radius: 12px; background: rgba(40, 20, 0, 0.3);">
+                            <h3 style="margin: 0 0 0.5rem 0; color: #ffb86b;">
+                                <i class="fa-solid fa-graduation-cap"></i> การจัดการประจำปีการศึกษา
+                            </h3>
+                            <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1.5rem;">
+                                ใช้เครื่องมือเหล่านี้เมื่อสิ้นสุดปีการศึกษาหรือต้องการเปิดเทอมใหม่ — โปรดตรวจสอบรายละเอียดก่อนกดทุกครั้ง
+                            </p>
+
+                            <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                                <button class="btn-danger" onclick="promoteAllStudents()">
+                                    <i class="fa-solid fa-arrow-up-right-dots"></i> เลื่อนชั้นประจำปี (ม.1→ม.2 ... ม.6→จบ)
+                                </button>
+                                <button class="btn-danger" onclick="startNewTerm()">
+                                    <i class="fa-solid fa-rotate-right"></i> เริ่มเทอมใหม่ (รีเซ็ตที่นั่งทั้งหมด)
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- 🎓 จัดการข้อมูลศิษย์เก่า (PDPA) -->
+                        <div class="admin-card" style="margin-top: 1.5rem;">
+                            <h3 style="margin-bottom: 0.5rem;">
+                                <i class="fa-solid fa-user-graduate"></i> จัดการข้อมูลศิษย์เก่า (PDPA)
+                            </h3>
+                            <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1.25rem;">
+                                ปกปิดข้อมูลศิษย์เก่าที่จบเกินจำนวนปีที่กำหนด (แทนชื่อด้วย "ศิษย์เก่า #YEAR-NNN" เพื่อรักษาสถิติแต่ลบข้อมูลส่วนตัว)
+                                หรือลบรายคนถาวรตามสิทธิ์ในการลบข้อมูล (Right to Erasure)
+                            </p>
+
+                            <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 1rem;">
+                                <label style="font-weight: 600;">ปกปิดศิษย์เก่าที่จบเกิน:</label>
+                                <input id="alumni-years-old" type="number" min="0" value="5"
+                                       style="width: 80px; padding: 8px; border-radius: 6px; border: 1px solid var(--border);">
+                                <span>ปี</span>
+                                <button class="btn-danger" onclick="anonymizeGraduatedStudents()">
+                                    <i class="fa-solid fa-user-secret"></i> ปกปิดข้อมูลศิษย์เก่า
+                                </button>
+                                <button class="btn-secondary" onclick="loadGraduatedStudentsList()">
+                                    <i class="fa-solid fa-rotate"></i> โหลดรายชื่อศิษย์เก่า
+                                </button>
+                            </div>
+
+                            <div style="overflow-x: auto;">
+                                <table class="data-table" style="width: 100%;">
+                                    <thead>
+                                        <tr>
+                                            <th>#</th>
+                                            <th>รหัสนักเรียน</th>
+                                            <th>ชื่อ-นามสกุล</th>
+                                            <th>ปีที่จบ</th>
+                                            <th style="text-align: right;">จัดการ</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="graduated-students-tbody">
+                                        <tr><td colspan="5" style="text-align:center; color: var(--text-secondary); padding: 1.5rem;">
+                                            กด "โหลดรายชื่อศิษย์เก่า" เพื่อแสดงข้อมูล
+                                        </td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Sub-Tab 6: Audit Logs (ตรวจสอบประวัติความปลอดภัย) -->
@@ -1025,6 +1099,6 @@
     <!-- 💻 6. Javascript Logic Engine -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="config.js?v=1.1.2"></script>
-    <script src="app.js?v=1.1.9"></script>
+    <script src="app.js?v=1.2.2"></script>
 </body>
 </html>

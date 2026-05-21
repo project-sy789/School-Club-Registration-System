@@ -1559,6 +1559,34 @@ input[type="checkbox"]:checked + .toggle-switch::after {
     color: var(--text-primary);
 }
 
+.btn-danger {
+    background: var(--status-danger);
+    color: #fff;
+    border: none;
+    outline: none;
+    padding: 10px 20px;
+    border-radius: var(--border-radius-sm);
+    font-weight: 700;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: var(--transition-smooth);
+}
+
+.btn-danger:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(239, 68, 68, 0.35);
+    filter: brightness(1.08);
+}
+
+.btn-danger:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
 .btn-small-success {
     background: var(--accent-dark-green);
     border: 1px solid var(--accent-mint);

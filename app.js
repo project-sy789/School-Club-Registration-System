@@ -12,7 +12,7 @@ let state = {
     registrations: [],
     auditLogs: [], // เก็บประวัติความปลอดภัยระบบ
     settings: {
-        school_config: { school_name: "ระบบลงทะเบียนชุมนุม", semester: "1/2569", admin_password: "admin" },
+        school_config: { school_name: "ระบบลงทะเบียนชุมนุม", semester: "1", academic_year: "2569", admin_password: "admin-password-1234" },
         registration_period: { is_active: true, start_time: "", end_time: "" }
     },
     currentClub: null,
@@ -51,6 +51,42 @@ document.addEventListener("DOMContentLoaded", () => {
 
     initSupabaseConnection();
 });
+
+// 📅 helper: คืนค่าเทอม/ปีการศึกษาปัจจุบัน รองรับ legacy ที่เก็บ "S/Y" รวมกัน
+function getCurrentTerm() {
+    const cfg = (state.settings && state.settings.school_config) || {};
+    let academic_year = cfg.academic_year;
+    let semester = cfg.semester;
+    if (!academic_year && typeof semester === 'string' && semester.includes('/')) {
+        const parts = semester.split('/').map(s => s.trim());
+        semester = parts[0] || '1';
+        academic_year = parts[1] || '2569';
+    }
+    return {
+        academic_year: (academic_year || '2569').toString().trim(),
+        semester: (semester || '1').toString().trim()
+    };
+}
+
+// 📅 helper: ใส่ filter เทอม/ปีการศึกษา ลงใน Supabase query ตามค่า dropdown #reg-term-filter
+// __current__ = เทอมปัจจุบัน, __all__ = ทุกเทอม (ไม่กรอง), "<year>|<sem>" = เทอมประวัติ
+function applyTermFilter(query) {
+    const sel = document.getElementById("reg-term-filter");
+    const value = (sel && sel.value) || "__current__";
+    if (value === "__all__") {
+        return query;
+    }
+    if (value === "__current__") {
+        const { academic_year, semester } = getCurrentTerm();
+        return query.eq("academic_year", academic_year).eq("semester", semester);
+    }
+    const [y, s] = value.split("|");
+    if (y && s) {
+        return query.eq("academic_year", y).eq("semester", s);
+    }
+    const { academic_year, semester } = getCurrentTerm();
+    return query.eq("academic_year", academic_year).eq("semester", semester);
+}
 
 // 🌐 ดึงข้อมูล IP Address สาธารณะของนักเรียนแบบ Non-blocking (พร้อม Timeout)
 async function getUserIpAddress() {
@@ -140,10 +176,11 @@ async function loadSystemSettings() {
 
 function updateSystemUI() {
     const config = state.settings.school_config || {};
+    const term = getCurrentTerm();
     document.getElementById("header-school-name").innerText = config.school_name || "ระบบลงทะเบียนชุมนุม";
-    document.getElementById("header-semester-label").innerText = `ภาคเรียนที่ ${config.semester || "1/2569"}`;
+    document.getElementById("header-semester-label").innerText = `ภาคเรียนที่ ${term.semester}/${term.academic_year}`;
     document.getElementById("banner-school-title").innerText = `ยินดีต้อนรับสู่ระบบลงทะเบียนชุมนุม ${config.school_name || ""}`;
-    document.getElementById("banner-semester-badge").innerText = `ปีการศึกษา ${config.semester || "1/2569"}`;
+    document.getElementById("banner-semester-badge").innerText = `ภาคเรียนที่ ${term.semester} ปีการศึกษา ${term.academic_year}`;
     document.getElementById("ticket-school-name").innerText = config.school_name || "";
 
     // 🖼️ อัปเดตโลโก้โรงเรียน (Header Logo)
@@ -300,6 +337,7 @@ function switchTab(tabId) {
         loadClubsData();
     } else if (tabId === 'search') {
         populateSearchClubDropdown();
+        populateTermFilterDropdown();
     } else if (tabId === 'admin' && state.isAdminLoggedIn) {
         loadAdminDashboardData();
     }
@@ -462,6 +500,7 @@ async function quickVerifyStudent() {
             .from("students")
             .select("*")
             .eq("student_id", idInput)
+            .eq("status", "active")
             .maybeSingle();
 
         if (error) throw error;
@@ -792,6 +831,7 @@ async function verifyStudentID() {
             .from("students")
             .select("*")
             .eq("student_id", idInput)
+            .eq("status", "active")
             .maybeSingle();
 
         if (error) throw error;
@@ -1038,13 +1078,14 @@ async function searchStudentRegistrations() {
             orFilter += `,club_id.in.(${clubIds.join(',')})`;
         }
 
-        const { data, error } = await supabaseClient
+        let query = supabaseClient
             .from("registrations")
             .select(`
                 *,
                 clubs ( name, teacher )
-            `)
-            .or(orFilter);
+            `);
+        query = applyTermFilter(query);
+        const { data, error } = await query.or(orFilter);
 
         if (error) throw error;
 
@@ -1117,6 +1158,62 @@ async function populateSearchClubDropdown() {
     });
 }
 
+// 📅 ดึงและเติมตัวเลือกเทอม/ปีการศึกษาในหน้าค้นหาผลการลงทะเบียน
+async function populateTermFilterDropdown() {
+    const select = document.getElementById("reg-term-filter");
+    if (!select) return;
+
+    const previousValue = select.value || "__current__";
+    const { academic_year: curYear, semester: curSem } = getCurrentTerm();
+
+    select.innerHTML = "";
+    const optCurrent = document.createElement("option");
+    optCurrent.value = "__current__";
+    optCurrent.textContent = `เทอมปัจจุบัน (${curSem}/${curYear})`;
+    select.appendChild(optCurrent);
+
+    const optAll = document.createElement("option");
+    optAll.value = "__all__";
+    optAll.textContent = "ทุกเทอม (ทั้งหมด)";
+    select.appendChild(optAll);
+
+    try {
+        const { data, error } = await supabaseClient
+            .from("registrations")
+            .select("academic_year, semester");
+        if (error) throw error;
+
+        const seen = new Set();
+        (data || []).forEach(r => {
+            if (r.academic_year && r.semester) {
+                seen.add(`${r.academic_year}|${r.semester}`);
+            }
+        });
+
+        const terms = Array.from(seen)
+            .map(s => s.split("|"))
+            .sort((a, b) => {
+                if (a[0] !== b[0]) return b[0].localeCompare(a[0]);
+                return b[1].localeCompare(a[1]);
+            });
+
+        terms.forEach(([y, s]) => {
+            const opt = document.createElement("option");
+            opt.value = `${y}|${s}`;
+            opt.textContent = `เทอม ${s}/${y}`;
+            select.appendChild(opt);
+        });
+    } catch (e) {
+        console.error("Error loading term filter list:", e);
+    }
+
+    if (Array.from(select.options).some(o => o.value === previousValue)) {
+        select.value = previousValue;
+    } else {
+        select.value = "__current__";
+    }
+}
+
 // 🏫 จัดการเมื่อมีการเลือกชุมนุมใน dropdown ค้นหา
 async function handleClubSelectChange(event) {
     const clubId = event.target.value;
@@ -1143,14 +1240,15 @@ async function handleClubSelectChange(event) {
     emptyState.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin" style="font-size:2.5rem; color:var(--accent-mint); margin-bottom:1rem;"></i><p>กำลังค้นหาข้อมูลการลงทะเบียน...</p>`;
 
     try {
-        const { data, error } = await supabaseClient
+        let query = supabaseClient
             .from("registrations")
             .select(`
                 *,
                 clubs ( name, teacher )
             `)
-            .eq("club_id", clubId)
-            .order("created_at", { ascending: true });
+            .eq("club_id", clubId);
+        query = applyTermFilter(query);
+        const { data, error } = await query.order("created_at", { ascending: true });
 
         if (error) throw error;
 
@@ -1200,7 +1298,7 @@ function attemptAdminLogin() {
     const entered = document.getElementById("admin-passcode-input").value;
     const config = state.settings.school_config || {};
     
-    if (entered === (config.admin_password || "admin")) {
+    if (entered === (config.admin_password || "admin-password-1234")) {
         state.isAdminLoggedIn = true;
         document.getElementById("admin-login-area").style.display = "none";
         document.getElementById("admin-dashboard-area").style.display = "grid";
@@ -1245,13 +1343,16 @@ async function loadAdminDashboardData() {
     if (!supabaseClient || !state.isAdminLoggedIn) return;
 
     try {
-        // ดึงการลงทะเบียนทั้งหมดพร้อมข้อมูลความสัมพันธ์
+        const { academic_year, semester } = getCurrentTerm();
+        // ดึงการลงทะเบียนของเทอมปัจจุบันพร้อมข้อมูลความสัมพันธ์
         const { data: regs, error: errRegs } = await supabaseClient
             .from("registrations")
             .select(`
                 *,
                 clubs ( name, teacher, location )
             `)
+            .eq("academic_year", academic_year)
+            .eq("semester", semester)
             .order("created_at", { ascending: false });
 
         if (errRegs) throw errRegs;
@@ -1669,7 +1770,8 @@ async function populateRegistrationLevelDropdown(force = false) {
     try {
         const { data, error } = await supabaseClient
             .from("students")
-            .select("level");
+            .select("level")
+            .eq("status", "active");
         
         if (error) throw error;
         
@@ -1843,7 +1945,8 @@ async function populateStudentLevelDropdown() {
     try {
         const { data, error } = await supabaseClient
             .from("students")
-            .select("level");
+            .select("level")
+            .eq("status", "active");
         
         if (error) throw error;
         
@@ -2623,6 +2726,7 @@ function renderAdminSettings() {
     const period = state.settings.registration_period || {};
 
     document.getElementById("admin-settings-school-name").value = config.school_name || "";
+    document.getElementById("admin-settings-academic-year").value = config.academic_year || "";
     document.getElementById("admin-settings-semester").value = config.semester || "";
     document.getElementById("admin-settings-admin-password").value = config.admin_password || "";
 
@@ -2668,6 +2772,7 @@ async function saveSystemSettings() {
     if (!supabaseClient) return;
 
     const schoolName = document.getElementById("admin-settings-school-name").value.trim();
+    const academicYear = document.getElementById("admin-settings-academic-year").value.trim();
     const semester = document.getElementById("admin-settings-semester").value.trim();
     const adminPassword = document.getElementById("admin-settings-admin-password").value.trim();
 
@@ -2675,13 +2780,14 @@ async function saveSystemSettings() {
     const start_time = document.getElementById("admin-settings-start-time").value;
     const end_time = document.getElementById("admin-settings-end-time").value;
 
-    if (!schoolName || !semester || !adminPassword) {
-        showToast("กรุณากรอกข้อมูลตั้งค่าหลักให้ครบถ้วน (ชื่อ, เทอม, รหัสผ่านใหม่)", "warning");
+    if (!schoolName || !academicYear || !semester || !adminPassword) {
+        showToast("กรุณากรอกข้อมูลตั้งค่าหลักให้ครบถ้วน (ชื่อ, ปีการศึกษา, ภาคเรียน, รหัสผ่านใหม่)", "warning");
         return;
     }
 
     const payloadConfig = {
         school_name: schoolName,
+        academic_year: academicYear,
         semester,
         admin_password: adminPassword,
         logo_base64: state.temp_logo_base64 || null
@@ -2712,7 +2818,7 @@ async function saveSystemSettings() {
                 action: "SETTINGS_UPDATED",
                 ip_address: ipAddress,
                 user_agent: navigator.userAgent || "Unknown Device",
-                details: `ผู้ดูแลระบบแก้ไขการตั้งค่าระบบ: ชื่อโรงเรียน="${schoolName}", ภาคเรียน="${semester}", สถานะเปิดรับสมัคร=${is_active ? 'เปิด' : 'ปิด'}`
+                details: `ผู้ดูแลระบบแก้ไขการตั้งค่าระบบ: ชื่อโรงเรียน="${schoolName}", ปีการศึกษา="${academicYear}", ภาคเรียน="${semester}", สถานะเปิดรับสมัคร=${is_active ? 'เปิด' : 'ปิด'}`
             });
         } catch (logErr) {
             console.error("Failed to write settings audit log:", logErr);
@@ -2794,7 +2900,7 @@ function exportAllRegistrationsToCSV() {
         csvContent += `"${studentId}","${r.prefix || ""}","${r.first_name}","${r.last_name}","${r.level}","${status}","${clubName}","${teacherName}","${loc}","${date}"\n`;
     });
 
-    downloadCSVFile(csvContent, `รายงานการลงทะเบียนชุมนุมทั้งหมด_${state.settings.school_config.semester.replace('/', '-')}.csv`);
+    downloadCSVFile(csvContent, `รายงานการลงทะเบียนชุมนุมทั้งหมด_เทอม${state.settings.school_config.semester}-${state.settings.school_config.academic_year}.csv`);
 }
 
 function exportSingleClubToCSV(clubId, clubName) {
@@ -3345,6 +3451,7 @@ async function saveAdminStudentRegistration() {
             showToast("แก้ไขข้อมูลนักเรียนในทะเบียนสำเร็จแล้ว", "success");
         } else {
             // โหมดเพิ่มใหม่
+            const { academic_year, semester } = getCurrentTerm();
             const { error: insertErr } = await supabaseClient
                 .from("registrations")
                 .insert([{
@@ -3354,7 +3461,9 @@ async function saveAdminStudentRegistration() {
                     first_name: firstName,
                     last_name: lastName,
                     level: level,
-                    registration_status: status
+                    registration_status: status,
+                    academic_year,
+                    semester
                 }]);
 
             if (insertErr) throw insertErr;
@@ -3495,4 +3604,220 @@ window.handleAdminStudentIdChange = handleAdminStudentIdChange;
 window.editAdminStudent = editAdminStudent;
 window.saveAdminStudentRegistration = saveAdminStudentRegistration;
 window.deleteAdminStudent = deleteAdminStudent;
+
+// ────────────────────────────────────────────────────────────────────
+// 🎓 เลื่อนชั้นประจำปี — เรียก RPC promote_all_students
+// ────────────────────────────────────────────────────────────────────
+async function promoteAllStudents() {
+    const warning =
+        "⚠️ ยืนยันการเลื่อนชั้นประจำปี?\n\n" +
+        "• นักเรียน ม.1–ม.5 จะถูกเลื่อนขึ้น 1 ระดับ (คงห้องเดิม)\n" +
+        "• นักเรียน ม.6 จะถูกบันทึกเป็น 'จบการศึกษา'\n\n" +
+        "การกระทำนี้ไม่สามารถย้อนกลับได้ ดำเนินการต่อหรือไม่?";
+    if (!confirm(warning)) return;
+
+    try {
+        const ipAddress = await getUserIpAddress();
+        const { data, error } = await supabaseClient.rpc("promote_all_students", {
+            p_ip_address: ipAddress,
+            p_user_agent: navigator.userAgent,
+        });
+        if (error) throw error;
+        if (!data || data.success === false) {
+            throw new Error((data && data.message) || "ไม่สามารถเลื่อนชั้นได้");
+        }
+
+        showToast(
+            `เลื่อนชั้นสำเร็จ: เลื่อน ${data.promoted} คน, จบการศึกษา ${data.graduated} คน, ข้าม ${data.unchanged} คน`,
+            "success"
+        );
+
+        await loadClubsData();
+        await loadAdminDashboardData();
+        if (typeof loadStudentsList === "function") await loadStudentsList();
+    } catch (e) {
+        console.error("promoteAllStudents error:", e);
+        showToast("เลื่อนชั้นไม่สำเร็จ: " + (e.message || e), "error");
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 🆕 เริ่มเทอมใหม่ — เรียก RPC start_new_term
+// ────────────────────────────────────────────────────────────────────
+async function startNewTerm() {
+    const yearInput = prompt("ระบุปีการศึกษาใหม่ (เช่น 2570):", "");
+    if (yearInput === null) return;
+    const semInput = prompt("ระบุภาคเรียนใหม่ (1 หรือ 2):", "");
+    if (semInput === null) return;
+
+    const academicYear = (yearInput || "").trim();
+    const semester = (semInput || "").trim();
+    if (!academicYear || !semester) {
+        showToast("กรุณาระบุปีการศึกษาและภาคเรียนให้ครบถ้วน", "warning");
+        return;
+    }
+
+    const warning =
+        `⚠️ ยืนยันเริ่มเทอมใหม่: ${semester}/${academicYear}?\n\n` +
+        "• ที่นั่งของทุกชุมนุมจะถูกรีเซ็ตเป็น 0\n" +
+        "• ข้อมูลการลงทะเบียนของเทอมเก่าจะถูกเก็บเป็นประวัติ\n" +
+        "• ระบบจะเริ่มรับสมัครของเทอมใหม่นี้แทน\n\n" +
+        "การกระทำนี้ไม่สามารถย้อนกลับได้ ดำเนินการต่อหรือไม่?";
+    if (!confirm(warning)) return;
+
+    try {
+        const ipAddress = await getUserIpAddress();
+        const { data, error } = await supabaseClient.rpc("start_new_term", {
+            p_academic_year: academicYear,
+            p_semester: semester,
+            p_ip_address: ipAddress,
+            p_user_agent: navigator.userAgent,
+        });
+        if (error) throw error;
+        if (!data || data.success === false) {
+            throw new Error((data && data.message) || "ไม่สามารถเริ่มเทอมใหม่ได้");
+        }
+
+        showToast(
+            `เริ่มเทอมใหม่สำเร็จ: ${data.old_term} → ${data.new_term} (รีเซ็ตที่นั่ง ${data.clubs_reset} ชุมนุม)`,
+            "success"
+        );
+
+        await loadSystemSettings();
+        await loadClubsData();
+        await loadAdminDashboardData();
+    } catch (e) {
+        console.error("startNewTerm error:", e);
+        showToast("เริ่มเทอมใหม่ไม่สำเร็จ: " + (e.message || e), "error");
+    }
+}
+
+window.promoteAllStudents = promoteAllStudents;
+window.startNewTerm = startNewTerm;
+
+// ────────────────────────────────────────────────────────────────────
+// 🎓 PDPA — จัดการข้อมูลศิษย์เก่า
+// ────────────────────────────────────────────────────────────────────
+async function anonymizeGraduatedStudents() {
+    const input = document.getElementById("alumni-years-old");
+    const yearsOld = parseInt((input && input.value) || "5", 10);
+    if (isNaN(yearsOld) || yearsOld < 0) {
+        showToast("กรุณาระบุจำนวนปีเป็นจำนวนเต็มไม่ติดลบ", "warning");
+        return;
+    }
+
+    const warning =
+        `⚠️ ยืนยันปกปิดข้อมูลศิษย์เก่าที่จบเกิน ${yearsOld} ปี?\n\n` +
+        "• ชื่อ-นามสกุล และรหัสนักเรียนจะถูกแทนด้วย 'ศิษย์เก่า #YEAR-NNN'\n" +
+        "• ข้อมูลในตารางลงทะเบียนจะถูกอัปเดตตาม\n" +
+        "• สถิติชุมนุมจะยังคงอยู่\n\n" +
+        "การกระทำนี้ไม่สามารถย้อนกลับได้ ดำเนินการต่อหรือไม่?";
+    if (!confirm(warning)) return;
+
+    try {
+        const ipAddress = await getUserIpAddress();
+        const { data, error } = await supabaseClient.rpc("anonymize_graduated_students", {
+            p_years_old: yearsOld,
+            p_ip_address: ipAddress,
+            p_user_agent: navigator.userAgent,
+        });
+        if (error) throw error;
+        if (!data || data.success === false) {
+            throw new Error((data && data.message) || "ไม่สามารถปกปิดข้อมูลได้");
+        }
+
+        showToast(
+            `ปกปิดข้อมูลสำเร็จ: ${data.anonymized} คน (cutoff ปี ${data.cutoff_year}, anonymous รวม ${data.total_anonymous} คน)`,
+            "success"
+        );
+        await loadGraduatedStudentsList();
+    } catch (e) {
+        console.error("anonymizeGraduatedStudents error:", e);
+        showToast("ปกปิดข้อมูลไม่สำเร็จ: " + (e.message || e), "error");
+    }
+}
+
+async function deleteGraduatedStudent(studentPk, displayName) {
+    const c1 = confirm(
+        `⚠️ ยืนยันลบข้อมูลถาวรของ "${displayName}"?\n\n` +
+        "ข้อมูลนักเรียนและประวัติการลงทะเบียนทั้งหมดจะถูกลบออกจากระบบ\n" +
+        "การกระทำนี้ไม่สามารถย้อนกลับได้"
+    );
+    if (!c1) return;
+    const c2 = prompt(`พิมพ์ "ลบถาวร" เพื่อยืนยันการลบ "${displayName}"`);
+    if (c2 !== "ลบถาวร") {
+        showToast("ยกเลิกการลบ (ข้อความยืนยันไม่ตรง)", "info");
+        return;
+    }
+
+    try {
+        const ipAddress = await getUserIpAddress();
+        const { data, error } = await supabaseClient.rpc("delete_graduated_student", {
+            p_student_pk: studentPk,
+            p_ip_address: ipAddress,
+            p_user_agent: navigator.userAgent,
+        });
+        if (error) throw error;
+        if (!data || data.success === false) {
+            throw new Error((data && data.message) || "ไม่สามารถลบข้อมูลได้");
+        }
+
+        showToast(
+            `ลบข้อมูล "${data.deleted_student}" สำเร็จ (ลบ registrations ${data.registrations_deleted} รายการ)`,
+            "success"
+        );
+        await loadGraduatedStudentsList();
+    } catch (e) {
+        console.error("deleteGraduatedStudent error:", e);
+        showToast("ลบข้อมูลไม่สำเร็จ: " + (e.message || e), "error");
+    }
+}
+
+async function loadGraduatedStudentsList() {
+    const tbody = document.getElementById("graduated-students-tbody");
+    if (!tbody) return;
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 1.5rem;">กำลังโหลด...</td></tr>';
+
+    try {
+        const { data, error } = await supabaseClient
+            .from("students")
+            .select("id, student_id, prefix, first_name, last_name, graduated_year")
+            .eq("status", "graduated")
+            .order("graduated_year", { ascending: false })
+            .order("first_name", { ascending: true });
+        if (error) throw error;
+
+        if (!data || data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: var(--text-secondary); padding: 1.5rem;">ไม่พบข้อมูลศิษย์เก่า</td></tr>';
+            return;
+        }
+
+        const escapeHtml = (s) => String(s || "").replace(/[&<>"']/g, (c) => ({
+            "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+        }[c]));
+
+        tbody.innerHTML = data.map((s, idx) => {
+            const fullName = `${s.prefix || ""}${s.first_name || ""} ${s.last_name || ""}`.trim();
+            return `
+                <tr>
+                    <td>${idx + 1}</td>
+                    <td>${escapeHtml(s.student_id || "-")}</td>
+                    <td>${escapeHtml(fullName)}</td>
+                    <td>${escapeHtml(s.graduated_year || "-")}</td>
+                    <td style="text-align: right;">
+                        <button class="btn-danger btn-sm" onclick="deleteGraduatedStudent('${s.id}', '${escapeHtml(fullName).replace(/'/g, "\\'")}')">
+                            <i class="fa-solid fa-trash"></i> ลบถาวร
+                        </button>
+                    </td>
+                </tr>`;
+        }).join("");
+    } catch (e) {
+        console.error("loadGraduatedStudentsList error:", e);
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color: var(--danger); padding: 1.5rem;">โหลดข้อมูลไม่สำเร็จ: ${e.message || e}</td></tr>`;
+    }
+}
+
+window.anonymizeGraduatedStudents = anonymizeGraduatedStudents;
+window.deleteGraduatedStudent = deleteGraduatedStudent;
+window.loadGraduatedStudentsList = loadGraduatedStudentsList;
 

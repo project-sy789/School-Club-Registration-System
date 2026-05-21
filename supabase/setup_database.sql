@@ -21,7 +21,8 @@ CREATE TABLE settings (
 INSERT INTO settings (key, value) VALUES
 ('school_config', '{
     "school_name": "โรงเรียนมัธยมศึกษารวมวิทยายน",
-    "semester": "1/2569",
+    "academic_year": "2569",
+    "semester": "1",
     "admin_password": "admin-password-1234",
     "logo_base64": null
 }'::jsonb),
@@ -62,7 +63,9 @@ CREATE TABLE students (
     prefix TEXT, -- คำนำหน้าชื่อ เช่น เด็กชาย, นาย, นางสาว
     first_name TEXT NOT NULL,
     last_name TEXT NOT NULL,
-    level TEXT NOT NULL -- เช่น ม.4/1, ม.5/2
+    level TEXT NOT NULL, -- เช่น ม.4/1, ม.5/2
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'graduated')),
+    graduated_year TEXT
 );
 
 -- เปิดใช้งาน RLS สำหรับ Students
@@ -81,10 +84,14 @@ CREATE TABLE registrations (
     last_name TEXT NOT NULL,
     level TEXT NOT NULL, -- เช่น ม.4/1
     registration_status TEXT NOT NULL CHECK (registration_status IN ('verified', 'pending')),
+    academic_year TEXT NOT NULL DEFAULT '2569',
+    semester TEXT NOT NULL DEFAULT '1',
     created_at TIMESTAMPTZ DEFAULT now(),
-    -- ห้ามชื่อ-นามสกุลเดียวกันลงทะเบียนซ้ำในระบบ
-    CONSTRAINT unique_student_name UNIQUE (first_name, last_name)
+    -- ห้ามชื่อ-นามสกุลเดียวกันลงทะเบียนซ้ำภายในเทอม/ปีการศึกษาเดียวกัน
+    CONSTRAINT unique_student_name_per_term UNIQUE (first_name, last_name, academic_year, semester)
 );
+
+CREATE INDEX IF NOT EXISTS idx_registrations_term ON registrations(academic_year, semester);
 
 -- เปิดใช้งาน RLS สำหรับ Registrations
 ALTER TABLE registrations ENABLE ROW LEVEL SECURITY;
@@ -144,15 +151,21 @@ DECLARE
     v_status TEXT;
     v_registered_id UUID;
     v_student_id_cleaned TEXT;
+    v_current_year TEXT;
+    v_current_sem TEXT;
 BEGIN
-    -- ทำความสะอาดรหัสนักเรียน (ลบเว้นวรรค)
-    v_student_id_cleaned := TRIM(p_student_id);
-    IF v_student_id_cleaned = '' THEN
-        v_student_id_cleaned := NULL;
-    END IF;
+    v_student_id_cleaned := NULLIF(TRIM(p_student_id), '');
+
+    -- โหลดเทอมปัจจุบันจาก school_config
+    SELECT
+        COALESCE(value->>'academic_year', '2569'),
+        COALESCE(value->>'semester', '1')
+    INTO v_current_year, v_current_sem
+    FROM settings
+    WHERE key = 'school_config';
 
     -- 1. ตรวจสอบการเปิด-ปิดรับสมัครจากระบบ
-    SELECT 
+    SELECT
         (value->>'is_active')::BOOLEAN,
         (value->>'start_time')::TIMESTAMPTZ,
         (value->>'end_time')::TIMESTAMPTZ
@@ -172,41 +185,43 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'message', 'ระบบหมดเวลาเปิดรับสมัครชุมนุมเรียบร้อยแล้ว');
     END IF;
 
-    -- 2. ป้องกันสิทธิ์การลงทะเบียนซ้ำซ้อน
-    -- 2.1 ตรวจสอบกรณีใช้เลขประจำตัวนักเรียน
+    -- 2. ป้องกันลงทะเบียนซ้ำ — เฉพาะเทอม+ปีปัจจุบัน
     IF v_student_id_cleaned IS NOT NULL THEN
         SELECT EXISTS (
-            SELECT 1 FROM registrations WHERE student_id = v_student_id_cleaned
+            SELECT 1 FROM registrations
+            WHERE student_id = v_student_id_cleaned
+              AND academic_year = v_current_year
+              AND semester = v_current_sem
         ) INTO v_already_registered;
-        
+
         IF v_already_registered THEN
-            RETURN jsonb_build_object('success', false, 'message', 'รหัสนักเรียน ' || v_student_id_cleaned || ' นี้ได้ทำการลงทะเบียนเรียนชุมนุมไปเรียบร้อยแล้ว ห้ามสมัครซ้ำ');
+            RETURN jsonb_build_object('success', false, 'message', 'รหัสนักเรียน ' || v_student_id_cleaned || ' ได้ลงทะเบียนชุมนุมในเทอมนี้ไปแล้ว');
         END IF;
     END IF;
 
-    -- 2.2 ตรวจสอบกรณีชื่อและนามสกุล (ป้องกันสมัครซ้ำด้วยชื่อ)
-    -- จะถือว่าซ้ำก็ต่อเมื่อชื่อ-นามสกุลตรงกัน และ (มีฝ่ายใดฝ่ายหนึ่งไม่มีรหัสประจำตัว หรือทั้งสองฝ่ายมีรหัสประจำตัวตรงกัน)
     SELECT EXISTS (
-        SELECT 1 FROM registrations 
-        WHERE TRIM(first_name) = TRIM(p_first_name) 
+        SELECT 1 FROM registrations
+        WHERE TRIM(first_name) = TRIM(p_first_name)
           AND TRIM(last_name) = TRIM(p_last_name)
+          AND academic_year = v_current_year
+          AND semester = v_current_sem
           AND (
-              student_id IS NULL 
-              OR v_student_id_cleaned IS NULL 
+              student_id IS NULL
+              OR v_student_id_cleaned IS NULL
               OR student_id = v_student_id_cleaned
           )
     ) INTO v_already_registered;
 
     IF v_already_registered THEN
-        RETURN jsonb_build_object('success', false, 'message', 'นักเรียนชื่อ ' || p_first_name || ' ' || p_last_name || ' ได้ทำการลงทะเบียนเรียนชุมนุมไปเรียบร้อยแล้ว');
+        RETURN jsonb_build_object('success', false, 'message', 'นักเรียน ' || p_first_name || ' ' || p_last_name || ' ได้ลงทะเบียนชุมนุมในเทอมนี้ไปแล้ว');
     END IF;
 
-    -- 3. ตรวจสอบโควตาที่นั่งและล็อกข้อมูลชุมนุม (Row Lock) เพื่อป้องกันข้อมูลขัดแย้งขณะยิงเข้ามาพร้อมกันเยอะๆ
-    SELECT name, capacity, enrolled_count 
+    -- 3. ตรวจสอบโควตาที่นั่ง + Row Lock
+    SELECT name, capacity, enrolled_count
     INTO v_club_name, v_capacity, v_enrolled
     FROM clubs
     WHERE id = p_club_id
-    FOR UPDATE; -- สำคัญมาก! บล็อกและจัดคิวข้อมูลเพื่อให้ประมวลผลทีละคิวตรงชุมนุมนี้
+    FOR UPDATE;
 
     IF v_capacity IS NULL THEN
         RETURN jsonb_build_object('success', false, 'message', 'ไม่พบชุมนุมที่คุณเลือกในระบบ');
@@ -216,32 +231,25 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'message', 'ขออภัย ชุมนุม "' || v_club_name || '" เต็มโควตาแล้ว กรุณาเลือกชุมนุมอื่น');
     END IF;
 
-    -- 4. ตรวจสอบสถานะการยืนยันตัวตน (ถ้ามีใน DB นักเรียน = verified, ถ้าไม่มี = pending)
+    -- 4. verified vs pending — เฉพาะนักเรียน status='active' เท่านั้น
     IF v_student_id_cleaned IS NOT NULL THEN
         SELECT EXISTS (
-            SELECT 1 FROM students WHERE student_id = v_student_id_cleaned
+            SELECT 1 FROM students
+            WHERE student_id = v_student_id_cleaned
+              AND status = 'active'
         ) INTO v_student_exists;
     ELSE
-        v_student_exists := false;
+        v_student_exists := FALSE;
     END IF;
+    v_status := CASE WHEN v_student_exists THEN 'verified' ELSE 'pending' END;
 
-    IF v_student_exists THEN
-        v_status := 'verified';
-    ELSE
-        v_status := 'pending';
-    END IF;
-
-    -- 5. ดำเนินการสมัคร: เพิ่มชื่อนักเรียนในตารางการลงทะเบียน
-    INSERT INTO registrations (club_id, student_id, prefix, first_name, last_name, level, registration_status)
-    VALUES (p_club_id, v_student_id_cleaned, TRIM(p_prefix), TRIM(p_first_name), TRIM(p_last_name), TRIM(p_level), v_status)
+    -- 5. บันทึกลง registrations + stamp ปี/เทอม
+    INSERT INTO registrations (club_id, student_id, prefix, first_name, last_name, level, registration_status, academic_year, semester)
+    VALUES (p_club_id, v_student_id_cleaned, TRIM(p_prefix), TRIM(p_first_name), TRIM(p_last_name), TRIM(p_level), v_status, v_current_year, v_current_sem)
     RETURNING id INTO v_registered_id;
 
-    -- 6. อัปเดตยอดผู้สมัครในแถวของชุมนุมให้เรียบร้อย
-    UPDATE clubs
-    SET enrolled_count = enrolled_count + 1
-    WHERE id = p_club_id;
+    UPDATE clubs SET enrolled_count = enrolled_count + 1 WHERE id = p_club_id;
 
-    -- 7. บันทึกประวัติความปลอดภัย (Audit Log)
     INSERT INTO audit_logs (student_id, student_name, action, club_name, ip_address, user_agent, details)
     VALUES (
         v_student_id_cleaned,
@@ -250,19 +258,17 @@ BEGIN
         v_club_name,
         COALESCE(p_ip_address, 'Unknown IP'),
         COALESCE(p_user_agent, 'Unknown Device'),
-        'นักเรียนทำการลงทะเบียนด้วยตนเอง (ระดับห้อง: ' || p_level || ', สถานะสิทธิ์: ' || v_status || ')'
+        'ลงทะเบียนเทอม ' || v_current_sem || '/' || v_current_year || ' (ระดับห้อง: ' || p_level || ', สถานะ: ' || v_status || ')'
     );
 
-    -- ส่งกลับผลลัพธ์สำเร็จ
     RETURN jsonb_build_object(
-        'success', true, 
-        'message', 'ลงทะเบียนเรียนชุมนุม "' || v_club_name || '" สำเร็จแล้ว', 
+        'success', true,
+        'message', 'ลงทะเบียนเรียนชุมนุม "' || v_club_name || '" สำเร็จแล้ว',
         'status', v_status,
         'registration_id', v_registered_id
     );
 
 EXCEPTION WHEN OTHERS THEN
-    -- เกิดข้อผิดพลาด ปลดการทำงานและ Rollback อัตโนมัติ
     RETURN jsonb_build_object('success', false, 'message', 'เกิดข้อผิดพลาดในการประมวลผล กรุณาลองใหม่อีกครั้ง (' || SQLERRM || ')');
 END;
 $$;
@@ -316,7 +322,15 @@ DECLARE
     v_inserted_count INT := 0;
     v_skipped JSONB := '[]'::jsonb;
     v_failed JSONB := '[]'::jsonb;
+    v_current_year TEXT;
+    v_current_sem TEXT;
 BEGIN
+    SELECT
+        COALESCE(value->>'academic_year', '2569'),
+        COALESCE(value->>'semester', '1')
+    INTO v_current_year, v_current_sem
+    FROM settings WHERE key = 'school_config';
+
     FOR v_row IN SELECT * FROM jsonb_array_elements(p_rows) LOOP
         BEGIN
             v_student_id_cleaned := NULLIF(TRIM(COALESCE(v_row->>'student_id', '')), '');
@@ -351,35 +365,42 @@ BEGIN
                 CONTINUE;
             END IF;
 
-            -- ป้องกันลงทะเบียนซ้ำด้วยรหัสนักเรียน
+            -- ป้องกันลงทะเบียนซ้ำด้วยรหัสนักเรียน — เฉพาะเทอม+ปีปัจจุบัน
             IF v_student_id_cleaned IS NOT NULL THEN
-                IF EXISTS (SELECT 1 FROM registrations WHERE student_id = v_student_id_cleaned) THEN
-                    v_skipped := v_skipped || jsonb_build_object('row', v_row, 'reason', 'รหัสนักเรียน ' || v_student_id_cleaned || ' ลงทะเบียนชุมนุมไปแล้ว');
+                IF EXISTS (SELECT 1 FROM registrations
+                           WHERE student_id = v_student_id_cleaned
+                             AND academic_year = v_current_year
+                             AND semester = v_current_sem) THEN
+                    v_skipped := v_skipped || jsonb_build_object('row', v_row, 'reason', 'รหัสนักเรียน ' || v_student_id_cleaned || ' ลงทะเบียนเทอมนี้ไปแล้ว');
                     CONTINUE;
                 END IF;
             END IF;
 
-            -- ป้องกันลงทะเบียนซ้ำด้วยชื่อ-นามสกุล (UNIQUE constraint ของตาราง registrations)
+            -- ป้องกันลงทะเบียนซ้ำด้วยชื่อ-นามสกุล — เฉพาะเทอม+ปีปัจจุบัน
             IF EXISTS (
                 SELECT 1 FROM registrations
                 WHERE TRIM(first_name) = v_first_name
                   AND TRIM(last_name) = v_last_name
+                  AND academic_year = v_current_year
+                  AND semester = v_current_sem
             ) THEN
-                v_skipped := v_skipped || jsonb_build_object('row', v_row, 'reason', 'นักเรียน ' || v_first_name || ' ' || v_last_name || ' ลงทะเบียนชุมนุมไปแล้ว');
+                v_skipped := v_skipped || jsonb_build_object('row', v_row, 'reason', 'นักเรียน ' || v_first_name || ' ' || v_last_name || ' ลงทะเบียนเทอมนี้ไปแล้ว');
                 CONTINUE;
             END IF;
 
-            -- กำหนดสถานะ: มีในตาราง students = verified, ไม่มี = pending (ครูยืนยันภายหลัง)
+            -- กำหนดสถานะ: มีในตาราง students (status='active') = verified, ไม่มี = pending
             IF v_student_id_cleaned IS NOT NULL THEN
-                SELECT EXISTS (SELECT 1 FROM students WHERE student_id = v_student_id_cleaned) INTO v_student_exists;
+                SELECT EXISTS (SELECT 1 FROM students
+                               WHERE student_id = v_student_id_cleaned
+                                 AND status = 'active') INTO v_student_exists;
             ELSE
                 v_student_exists := FALSE;
             END IF;
             v_status := CASE WHEN v_student_exists THEN 'verified' ELSE 'pending' END;
 
             -- Insert ทะเบียนและเพิ่ม enrolled_count
-            INSERT INTO registrations (club_id, student_id, prefix, first_name, last_name, level, registration_status)
-            VALUES (v_club_id, v_student_id_cleaned, v_prefix, v_first_name, v_last_name, v_level, v_status);
+            INSERT INTO registrations (club_id, student_id, prefix, first_name, last_name, level, registration_status, academic_year, semester)
+            VALUES (v_club_id, v_student_id_cleaned, v_prefix, v_first_name, v_last_name, v_level, v_status, v_current_year, v_current_sem);
 
             UPDATE clubs SET enrolled_count = enrolled_count + 1 WHERE id = v_club_id;
 
@@ -396,9 +417,9 @@ BEGIN
         'BULK_REGISTRATION_IMPORT',
         COALESCE(p_ip_address, 'Unknown IP'),
         COALESCE(p_user_agent, 'Unknown Device'),
-        'ผู้ดูแลระบบนำเข้ารายชื่อลงทะเบียนชุมนุมแบบ Bulk: สำเร็จ ' || v_inserted_count
-            || ' รายการ, ข้าม ' || jsonb_array_length(v_skipped)
-            || ' รายการ, ผิดพลาด ' || jsonb_array_length(v_failed) || ' รายการ'
+        'Bulk import เทอม ' || v_current_sem || '/' || v_current_year || ': สำเร็จ ' || v_inserted_count
+            || ', ข้าม ' || jsonb_array_length(v_skipped)
+            || ', ผิดพลาด ' || jsonb_array_length(v_failed)
     );
 
     RETURN jsonb_build_object(
@@ -407,6 +428,148 @@ BEGIN
         'skipped', v_skipped,
         'failed', v_failed
     );
+END;
+$$;
+
+
+-- =====================================================================
+-- 🎓 STORED PROC: promote_all_students() — เลื่อนชั้นทั้งโรงเรียน
+-- ม.6/x → graduated, ม.5/x → ม.6/x, ... ม.1/x → ม.2/x (status='active' เท่านั้น)
+-- =====================================================================
+CREATE OR REPLACE FUNCTION promote_all_students(
+    p_ip_address TEXT DEFAULT NULL,
+    p_user_agent TEXT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_student RECORD;
+    v_grade_num INT;
+    v_classroom TEXT;
+    v_new_level TEXT;
+    v_promoted INT := 0;
+    v_graduated INT := 0;
+    v_unchanged INT := 0;
+    v_current_year TEXT;
+BEGIN
+    SELECT COALESCE(value->>'academic_year', '2569')
+    INTO v_current_year
+    FROM settings WHERE key = 'school_config';
+
+    FOR v_student IN
+        SELECT student_id, level FROM students WHERE status = 'active'
+    LOOP
+        v_grade_num := NULL;
+        BEGIN
+            v_grade_num := (regexp_match(v_student.level, 'ม\.?\s*([1-6])'))[1]::INT;
+        EXCEPTION WHEN OTHERS THEN
+            v_grade_num := NULL;
+        END;
+
+        v_classroom := NULLIF(TRIM(SPLIT_PART(REPLACE(v_student.level, '-', '/'), '/', 2)), '');
+
+        IF v_grade_num IS NULL THEN
+            v_unchanged := v_unchanged + 1;
+            CONTINUE;
+        END IF;
+
+        IF v_grade_num = 6 THEN
+            UPDATE students
+            SET status = 'graduated',
+                graduated_year = v_current_year
+            WHERE student_id = v_student.student_id;
+            v_graduated := v_graduated + 1;
+        ELSE
+            v_new_level := 'ม.' || (v_grade_num + 1)::TEXT
+                || CASE WHEN v_classroom IS NOT NULL THEN '/' || v_classroom ELSE '' END;
+            UPDATE students
+            SET level = v_new_level
+            WHERE student_id = v_student.student_id;
+            v_promoted := v_promoted + 1;
+        END IF;
+    END LOOP;
+
+    INSERT INTO audit_logs (action, ip_address, user_agent, details)
+    VALUES (
+        'PROMOTE_ALL_STUDENTS',
+        COALESCE(p_ip_address, 'Unknown IP'),
+        COALESCE(p_user_agent, 'Unknown Device'),
+        'เลื่อนชั้นประจำปี: เลื่อน ' || v_promoted || ' คน, จบการศึกษา ' || v_graduated || ' คน, ข้าม ' || v_unchanged || ' คน (ปี ' || v_current_year || ')'
+    );
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'promoted', v_promoted,
+        'graduated', v_graduated,
+        'unchanged', v_unchanged
+    );
+EXCEPTION WHEN OTHERS THEN
+    RETURN jsonb_build_object('success', false, 'message', SQLERRM);
+END;
+$$;
+
+
+-- =====================================================================
+-- 🆕 STORED PROC: start_new_term(p_year, p_semester)
+-- รีเซ็ต enrolled_count ทุกชุมนุม + อัปเดต school_config (ไม่ลบ registrations เก่า)
+-- =====================================================================
+CREATE OR REPLACE FUNCTION start_new_term(
+    p_academic_year TEXT,
+    p_semester TEXT,
+    p_ip_address TEXT DEFAULT NULL,
+    p_user_agent TEXT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_old_year TEXT;
+    v_old_sem TEXT;
+    v_clubs_reset INT;
+BEGIN
+    IF NULLIF(TRIM(p_academic_year), '') IS NULL OR NULLIF(TRIM(p_semester), '') IS NULL THEN
+        RETURN jsonb_build_object('success', false, 'message', 'กรุณาระบุปีการศึกษาและภาคเรียน');
+    END IF;
+
+    SELECT
+        COALESCE(value->>'academic_year', '2569'),
+        COALESCE(value->>'semester', '1')
+    INTO v_old_year, v_old_sem
+    FROM settings WHERE key = 'school_config';
+
+    IF v_old_year = TRIM(p_academic_year) AND v_old_sem = TRIM(p_semester) THEN
+        RETURN jsonb_build_object('success', false, 'message', 'เทอม ' || p_semester || '/' || p_academic_year || ' เป็นเทอมปัจจุบันอยู่แล้ว');
+    END IF;
+
+    UPDATE clubs SET enrolled_count = 0;
+    GET DIAGNOSTICS v_clubs_reset = ROW_COUNT;
+
+    UPDATE settings
+    SET value = value
+        || jsonb_build_object('academic_year', TRIM(p_academic_year))
+        || jsonb_build_object('semester', TRIM(p_semester))
+    WHERE key = 'school_config';
+
+    INSERT INTO audit_logs (action, ip_address, user_agent, details)
+    VALUES (
+        'START_NEW_TERM',
+        COALESCE(p_ip_address, 'Unknown IP'),
+        COALESCE(p_user_agent, 'Unknown Device'),
+        'เริ่มเทอมใหม่: ' || v_old_sem || '/' || v_old_year || ' → ' || p_semester || '/' || p_academic_year
+            || ' (รีเซ็ตที่นั่ง ' || v_clubs_reset || ' ชุมนุม)'
+    );
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'old_term', v_old_sem || '/' || v_old_year,
+        'new_term', TRIM(p_semester) || '/' || TRIM(p_academic_year),
+        'clubs_reset', v_clubs_reset
+    );
+EXCEPTION WHEN OTHERS THEN
+    RETURN jsonb_build_object('success', false, 'message', SQLERRM);
 END;
 $$;
 
@@ -444,3 +607,184 @@ INSERT INTO students (student_id, prefix, first_name, last_name, level) VALUES
 ('10014', 'เด็กหญิง', 'ชลิดา', 'เดชรุ่ง', 'ม.2/1'),
 ('10015', 'เด็กชาย', 'พีรพล', 'คงกระพัน', 'ม.3/1'),
 ('10016', 'เด็กหญิง', 'กนกวรรณ', 'สิริเวช', 'ม.3/2');
+-- =====================================================================
+-- 🚀 MIGRATION V3 — ระบบจัดการข้อมูลศิษย์เก่า (PDPA)
+-- =====================================================================
+-- ต้องรัน migration_v2.sql มาก่อน
+-- รันสคริปต์นี้บน Supabase SQL Editor *เพียงครั้งเดียว*
+-- ปลอดภัย: ใช้ CREATE OR REPLACE ทั้งหมด รันซ้ำได้ไม่เสีย
+-- =====================================================================
+
+-- ────────────────────────────────────────────────────────────────────
+-- 1. anonymize_graduated_students(p_years_old) — ปกปิดข้อมูลศิษย์เก่าเกิน N ปี
+-- แทนชื่อด้วย "ศิษย์เก่า #YEAR-NNN" เพื่อรักษาสถิติแต่ลบข้อมูลส่วนตัว
+-- ทำงานเฉพาะนักเรียน status='graduated' และ graduated_year ≤ (current - N)
+-- ────────────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION anonymize_graduated_students(
+    p_years_old INT DEFAULT 5,
+    p_ip_address TEXT DEFAULT NULL,
+    p_user_agent TEXT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_current_year_text TEXT;
+    v_current_year_int INT;
+    v_cutoff_year INT;
+    v_student RECORD;
+    v_counter INT;
+    v_anon_first TEXT;
+    v_anon_last TEXT;
+    v_anonymized INT := 0;
+    v_skipped INT := 0;
+BEGIN
+    IF p_years_old IS NULL OR p_years_old < 0 THEN
+        RETURN jsonb_build_object('success', false, 'message', 'จำนวนปีต้องเป็นจำนวนเต็มไม่ติดลบ');
+    END IF;
+
+    SELECT COALESCE(value->>'academic_year', '2569')
+    INTO v_current_year_text
+    FROM settings WHERE key = 'school_config';
+
+    BEGIN
+        v_current_year_int := v_current_year_text::INT;
+    EXCEPTION WHEN OTHERS THEN
+        RETURN jsonb_build_object('success', false, 'message', 'ปีการศึกษาในระบบไม่ใช่ตัวเลขที่ถูกต้อง: ' || v_current_year_text);
+    END;
+
+    v_cutoff_year := v_current_year_int - p_years_old;
+
+    FOR v_student IN
+        SELECT id, student_id, graduated_year, first_name, last_name
+        FROM students
+        WHERE status = 'graduated'
+          AND graduated_year IS NOT NULL
+          AND graduated_year ~ '^\d+$'
+          AND graduated_year::INT <= v_cutoff_year
+          AND first_name <> 'ศิษย์เก่า'
+        ORDER BY graduated_year, id
+    LOOP
+        -- หา counter ภายในปีนั้น (นับ anon ที่มีอยู่แล้ว + 1)
+        SELECT COUNT(*) + 1 INTO v_counter
+        FROM students
+        WHERE first_name = 'ศิษย์เก่า'
+          AND last_name LIKE '#' || v_student.graduated_year || '-%';
+
+        v_anon_first := 'ศิษย์เก่า';
+        v_anon_last := '#' || v_student.graduated_year || '-' || LPAD(v_counter::TEXT, 3, '0');
+
+        -- อัปเดต students
+        UPDATE students
+        SET prefix = NULL,
+            first_name = v_anon_first,
+            last_name = v_anon_last,
+            student_id = NULL
+        WHERE id = v_student.id;
+
+        -- อัปเดต registrations ที่อ้างถึงนักเรียนคนนี้ (จับด้วยชื่อเดิม + รหัสเดิม)
+        UPDATE registrations
+        SET prefix = NULL,
+            first_name = v_anon_first,
+            last_name = v_anon_last,
+            student_id = NULL
+        WHERE (
+                (v_student.student_id IS NOT NULL AND student_id = v_student.student_id)
+                OR (TRIM(first_name) = TRIM(v_student.first_name)
+                    AND TRIM(last_name) = TRIM(v_student.last_name))
+              );
+
+        v_anonymized := v_anonymized + 1;
+    END LOOP;
+
+    SELECT COUNT(*) INTO v_skipped
+    FROM students
+    WHERE status = 'graduated'
+      AND first_name = 'ศิษย์เก่า';
+
+    INSERT INTO audit_logs (action, ip_address, user_agent, details)
+    VALUES (
+        'ANONYMIZE_GRADUATED_STUDENTS',
+        COALESCE(p_ip_address, 'Unknown IP'),
+        COALESCE(p_user_agent, 'Unknown Device'),
+        'ปกปิดข้อมูลศิษย์เก่าที่จบเกิน ' || p_years_old || ' ปี (cutoff <= ' || v_cutoff_year
+            || '): ปกปิด ' || v_anonymized || ' คน, มี anonymous เดิมในระบบ ' || v_skipped || ' คน'
+    );
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'anonymized', v_anonymized,
+        'cutoff_year', v_cutoff_year,
+        'current_year', v_current_year_int,
+        'years_old', p_years_old,
+        'total_anonymous', v_skipped
+    );
+EXCEPTION WHEN OTHERS THEN
+    RETURN jsonb_build_object('success', false, 'message', SQLERRM);
+END;
+$$;
+
+-- ────────────────────────────────────────────────────────────────────
+-- 2. delete_graduated_student(p_student_pk) — ลบข้อมูลรายคนถาวร (PDPA)
+-- p_student_pk = students.id (UUID) — ลบทั้ง students + registrations ที่เชื่อมโยง
+-- เฉพาะนักเรียน status='graduated' เท่านั้น (กันลบนักเรียนปัจจุบันโดยพลาด)
+-- ────────────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION delete_graduated_student(
+    p_student_pk UUID,
+    p_ip_address TEXT DEFAULT NULL,
+    p_user_agent TEXT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_student RECORD;
+    v_reg_deleted INT := 0;
+    v_full_name TEXT;
+BEGIN
+    SELECT id, student_id, prefix, first_name, last_name, status, graduated_year
+    INTO v_student
+    FROM students WHERE id = p_student_pk;
+
+    IF v_student.id IS NULL THEN
+        RETURN jsonb_build_object('success', false, 'message', 'ไม่พบนักเรียนในระบบ');
+    END IF;
+
+    IF v_student.status <> 'graduated' THEN
+        RETURN jsonb_build_object('success', false, 'message', 'ลบได้เฉพาะนักเรียนที่จบการศึกษาแล้วเท่านั้น');
+    END IF;
+
+    v_full_name := COALESCE(v_student.prefix, '') || COALESCE(v_student.first_name, '')
+                || ' ' || COALESCE(v_student.last_name, '');
+
+    -- ลบ registrations ที่เชื่อมโยง (ผ่าน student_id หรือ ชื่อ-นามสกุล)
+    DELETE FROM registrations
+    WHERE (v_student.student_id IS NOT NULL AND student_id = v_student.student_id)
+       OR (TRIM(first_name) = TRIM(v_student.first_name)
+           AND TRIM(last_name) = TRIM(v_student.last_name));
+    GET DIAGNOSTICS v_reg_deleted = ROW_COUNT;
+
+    DELETE FROM students WHERE id = p_student_pk;
+
+    INSERT INTO audit_logs (student_id, student_name, action, ip_address, user_agent, details)
+    VALUES (
+        v_student.student_id,
+        v_full_name,
+        'DELETE_GRADUATED_STUDENT',
+        COALESCE(p_ip_address, 'Unknown IP'),
+        COALESCE(p_user_agent, 'Unknown Device'),
+        'ลบข้อมูลศิษย์เก่าถาวร (จบปี ' || COALESCE(v_student.graduated_year, '-')
+            || ', ลบ registrations ที่เชื่อมโยง ' || v_reg_deleted || ' รายการ)'
+    );
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'deleted_student', v_full_name,
+        'registrations_deleted', v_reg_deleted
+    );
+EXCEPTION WHEN OTHERS THEN
+    RETURN jsonb_build_object('success', false, 'message', SQLERRM);
+END;
+$$;
