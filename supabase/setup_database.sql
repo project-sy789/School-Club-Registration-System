@@ -788,3 +788,147 @@ EXCEPTION WHEN OTHERS THEN
     RETURN jsonb_build_object('success', false, 'message', SQLERRM);
 END;
 $$;
+-- =====================================================================
+-- 🔄 MIGRATION V4 — ย้อนกลับเทอม (Rollback Term)
+-- =====================================================================
+-- ต้องรัน migration_v3.sql มาก่อน
+-- รันสคริปต์นี้บน Supabase SQL Editor *เพียงครั้งเดียว*
+-- ปลอดภัย: ใช้ CREATE OR REPLACE ทั้งหมด รันซ้ำได้ไม่เสีย
+-- =====================================================================
+
+-- ────────────────────────────────────────────────────────────────────
+-- 1. list_archived_terms() — ดึงรายการเทอมทั้งหมดที่มีในระบบ
+-- คืนค่า: array ของ {academic_year, semester, registration_count, is_current}
+-- เรียงจากใหม่→เก่า (ปีล่าสุดก่อน, เทอมล่าสุดก่อน)
+-- ────────────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION list_archived_terms()
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_current_year TEXT;
+    v_current_sem TEXT;
+    v_terms JSONB;
+BEGIN
+    SELECT COALESCE(value->>'academic_year', '2569'),
+           COALESCE(value->>'semester', '1')
+    INTO v_current_year, v_current_sem
+    FROM settings WHERE key = 'school_config';
+
+    SELECT COALESCE(jsonb_agg(t ORDER BY t.academic_year DESC, t.semester DESC), '[]'::jsonb)
+    INTO v_terms
+    FROM (
+        SELECT academic_year,
+               semester,
+               COUNT(*) AS registration_count,
+               (academic_year = v_current_year AND semester = v_current_sem) AS is_current
+        FROM registrations
+        WHERE academic_year IS NOT NULL AND semester IS NOT NULL
+        GROUP BY academic_year, semester
+    ) t;
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'current_year', v_current_year,
+        'current_semester', v_current_sem,
+        'terms', v_terms
+    );
+EXCEPTION WHEN OTHERS THEN
+    RETURN jsonb_build_object('success', false, 'message', SQLERRM);
+END;
+$$;
+
+-- ────────────────────────────────────────────────────────────────────
+-- 2. rollback_to_term(p_academic_year, p_semester) — ย้อนกลับไปเทอมใดก็ได้
+-- รองรับการย้อนได้หลายเทอม หลายปี (เลือกได้ทุก tuple ที่มีใน registrations)
+-- ทำงาน:
+--   1) ตั้ง settings.school_config.academic_year/semester เป็นค่าที่เลือก
+--   2) คำนวณ clubs.enrolled_count ใหม่จาก registrations ของเทอมนั้น
+--      (นับทั้ง verified + pending เพื่อให้ตรงกับสภาพก่อน start_new_term)
+--   3) บันทึก audit_logs
+-- ────────────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION rollback_to_term(
+    p_academic_year TEXT,
+    p_semester TEXT,
+    p_ip_address TEXT DEFAULT NULL,
+    p_user_agent TEXT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_old_year TEXT;
+    v_old_sem TEXT;
+    v_reg_count INT;
+    v_clubs_updated INT;
+    v_old_config JSONB;
+BEGIN
+    IF p_academic_year IS NULL OR TRIM(p_academic_year) = ''
+       OR p_semester IS NULL OR TRIM(p_semester) = '' THEN
+        RETURN jsonb_build_object('success', false, 'message', 'กรุณาระบุปีการศึกษาและภาคเรียน');
+    END IF;
+
+    -- ตรวจว่ามีข้อมูลเทอมนี้จริงหรือไม่
+    SELECT COUNT(*) INTO v_reg_count
+    FROM registrations
+    WHERE academic_year = p_academic_year AND semester = p_semester;
+
+    IF v_reg_count = 0 THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'message', 'ไม่พบข้อมูลการสมัครของเทอม ' || p_semester || '/' || p_academic_year
+        );
+    END IF;
+
+    -- อ่าน config ปัจจุบัน
+    SELECT value INTO v_old_config FROM settings WHERE key = 'school_config';
+    v_old_year := COALESCE(v_old_config->>'academic_year', '');
+    v_old_sem  := COALESCE(v_old_config->>'semester', '');
+
+    IF v_old_year = p_academic_year AND v_old_sem = p_semester THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'message', 'ระบบอยู่ที่เทอม ' || p_semester || '/' || p_academic_year || ' อยู่แล้ว'
+        );
+    END IF;
+
+    -- อัปเดต settings เปลี่ยนปี + เทอม
+    UPDATE settings
+    SET value = COALESCE(value, '{}'::jsonb)
+              || jsonb_build_object('academic_year', p_academic_year, 'semester', p_semester),
+        updated_at = NOW()
+    WHERE key = 'school_config';
+
+    -- คำนวณ enrolled_count ใหม่จาก registrations ของเทอมเป้าหมาย
+    UPDATE clubs c
+    SET enrolled_count = COALESCE((
+        SELECT COUNT(*) FROM registrations r
+        WHERE r.club_id = c.id
+          AND r.academic_year = p_academic_year
+          AND r.semester = p_semester
+    ), 0);
+    GET DIAGNOSTICS v_clubs_updated = ROW_COUNT;
+
+    INSERT INTO audit_logs (action, ip_address, user_agent, details)
+    VALUES (
+        'ROLLBACK_TO_TERM',
+        COALESCE(p_ip_address, 'Unknown IP'),
+        COALESCE(p_user_agent, 'Unknown Device'),
+        'ย้อนกลับจากเทอม ' || COALESCE(v_old_sem, '-') || '/' || COALESCE(v_old_year, '-')
+            || ' → ' || p_semester || '/' || p_academic_year
+            || ' (ฟื้นข้อมูล ' || v_reg_count || ' การสมัคร, อัปเดต ' || v_clubs_updated || ' ชมรม)'
+    );
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'rolled_back_to', jsonb_build_object('academic_year', p_academic_year, 'semester', p_semester),
+        'previous_term', jsonb_build_object('academic_year', v_old_year, 'semester', v_old_sem),
+        'registrations_restored', v_reg_count,
+        'clubs_updated', v_clubs_updated
+    );
+EXCEPTION WHEN OTHERS THEN
+    RETURN jsonb_build_object('success', false, 'message', SQLERRM);
+END;
+$$;

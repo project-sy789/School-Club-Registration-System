@@ -3662,7 +3662,7 @@ async function startNewTerm() {
         "• ที่นั่งของทุกชุมนุมจะถูกรีเซ็ตเป็น 0\n" +
         "• ข้อมูลการลงทะเบียนของเทอมเก่าจะถูกเก็บเป็นประวัติ\n" +
         "• ระบบจะเริ่มรับสมัครของเทอมใหม่นี้แทน\n\n" +
-        "การกระทำนี้ไม่สามารถย้อนกลับได้ ดำเนินการต่อหรือไม่?";
+        "หากต้องการย้อนกลับ สามารถใช้ปุ่ม 'ย้อนกลับเทอม' ได้ภายหลัง ดำเนินการต่อหรือไม่?";
     if (!confirm(warning)) return;
 
     try {
@@ -3694,6 +3694,89 @@ async function startNewTerm() {
 
 window.promoteAllStudents = promoteAllStudents;
 window.startNewTerm = startNewTerm;
+
+// ────────────────────────────────────────────────────────────────────
+// ⏪ ย้อนกลับเทอม — เรียก RPC list_archived_terms + rollback_to_term
+// รองรับการย้อนได้หลายเทอม หลายปี (เลือก tuple ใดก็ได้ที่มีใน registrations)
+// ────────────────────────────────────────────────────────────────────
+async function rollbackToTerm() {
+    try {
+        const { data: listData, error: listErr } = await supabaseClient.rpc("list_archived_terms");
+        if (listErr) throw listErr;
+        if (!listData || listData.success === false) {
+            throw new Error((listData && listData.message) || "โหลดรายการเทอมไม่สำเร็จ");
+        }
+
+        const terms = Array.isArray(listData.terms) ? listData.terms : [];
+        if (terms.length === 0) {
+            showToast("ไม่พบประวัติเทอมในระบบ", "warning");
+            return;
+        }
+
+        const lines = terms.map((t, i) =>
+            `${i + 1}) ${t.semester}/${t.academic_year}` +
+            ` — ${t.registration_count} การสมัคร` +
+            (t.is_current ? " (เทอมปัจจุบัน)" : "")
+        ).join("\n");
+
+        const pick = prompt(
+            "เลือกเทอมที่ต้องการย้อนกลับ (พิมพ์หมายเลข):\n\n" + lines + "\n\n" +
+            `เทอมปัจจุบัน: ${listData.current_semester}/${listData.current_year}`,
+            ""
+        );
+        if (pick === null) return;
+
+        const idx = parseInt((pick || "").trim(), 10) - 1;
+        if (isNaN(idx) || idx < 0 || idx >= terms.length) {
+            showToast("หมายเลขที่เลือกไม่ถูกต้อง", "warning");
+            return;
+        }
+
+        const chosen = terms[idx];
+        if (chosen.is_current) {
+            showToast("เทอมที่เลือกคือเทอมปัจจุบันอยู่แล้ว", "info");
+            return;
+        }
+
+        const warning =
+            `⚠️ ยืนยันย้อนกลับไปยังเทอม ${chosen.semester}/${chosen.academic_year}?\n\n` +
+            `• ระบบจะเปลี่ยนปี/ภาคเรียนปัจจุบันเป็น ${chosen.semester}/${chosen.academic_year}\n` +
+            `• จำนวนสมาชิกของแต่ละชุมนุมจะถูกคำนวณใหม่จากการสมัครของเทอมนั้น\n` +
+            `• ข้อมูลการสมัคร ${chosen.registration_count} รายการจะกลับมาใช้งานได้\n\n` +
+            "ดำเนินการต่อหรือไม่?";
+        if (!confirm(warning)) return;
+
+        const ipAddress = await getUserIpAddress();
+        const { data, error } = await supabaseClient.rpc("rollback_to_term", {
+            p_academic_year: chosen.academic_year,
+            p_semester: chosen.semester,
+            p_ip_address: ipAddress,
+            p_user_agent: navigator.userAgent,
+        });
+        if (error) throw error;
+        if (!data || data.success === false) {
+            throw new Error((data && data.message) || "ย้อนกลับเทอมไม่สำเร็จ");
+        }
+
+        const prev = data.previous_term || {};
+        const to = data.rolled_back_to || {};
+        showToast(
+            `ย้อนกลับสำเร็จ: ${prev.semester || "-"}/${prev.academic_year || "-"} → ` +
+            `${to.semester}/${to.academic_year} ` +
+            `(ฟื้น ${data.registrations_restored} การสมัคร, อัปเดต ${data.clubs_updated} ชุมนุม)`,
+            "success"
+        );
+
+        await loadSystemSettings();
+        await loadClubsData();
+        await loadAdminDashboardData();
+    } catch (e) {
+        console.error("rollbackToTerm error:", e);
+        showToast("ย้อนกลับเทอมไม่สำเร็จ: " + (e.message || e), "error");
+    }
+}
+
+window.rollbackToTerm = rollbackToTerm;
 
 // ────────────────────────────────────────────────────────────────────
 // 🎓 PDPA — จัดการข้อมูลศิษย์เก่า
