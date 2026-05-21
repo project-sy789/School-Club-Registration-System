@@ -348,20 +348,28 @@
                                 </p>
                             </div>
                             <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
-                                <button class="btn-secondary" onclick="downloadClubTemplate()" style="padding: 6px 12px; font-size: 0.85rem; border-radius: 4px; display: flex; align-items: center; gap: 6px;">
-                                    <i class="fa-solid fa-download"></i> เทมเพลต Excel / CSV
+                                <button class="btn-small-success" onclick="downloadClubTemplate()">
+                                    <i class="fa-solid fa-download"></i> ดาวน์โหลดเทมเพลต Excel / CSV
                                 </button>
-                                <button class="btn-small-success" onclick="document.getElementById('csv-clubs-file-input').click()">
-                                    <i class="fa-solid fa-file-excel"></i> นำเข้าชุมนุมผ่าน CSV/Excel
-                                </button>
-                                <input type="file" id="csv-clubs-file-input" accept=".csv, .xlsx, .xls" style="display: none;" onchange="handleClubsCSVImport(event)">
                                 <button class="btn-primary" onclick="openClubFormModal()">
                                     <i class="fa-solid fa-plus"></i> เพิ่มชุมนุมใหม่
                                 </button>
                             </div>
                         </div>
 
-                        <div class="search-results-table-container">
+                        <div class="file-dropzone" onclick="document.getElementById('csv-clubs-file-input').click()">
+                            <i class="fa-solid fa-file-excel" style="color: var(--accent-mint);"></i>
+                            <h4>ลากไฟล์ .csv หรือ .xlsx มาวางที่นี่ หรือคลิกเพื่ออัปโหลด</h4>
+                            <p style="color: var(--text-secondary); font-size: 0.85rem;">
+                                โครงสร้างคอลัมน์: <strong>name, teacher, location, capacity, description, grades</strong>
+                                (<code>grades</code> คั่นด้วย <code>;</code> เช่น <code>ม.1;ม.2;ม.3</code>)
+                            </p>
+                            <input type="file" id="csv-clubs-file-input" accept=".csv, .xlsx, .xls" onchange="handleClubsCSVImport(event)">
+                        </div>
+
+                        <div style="margin-top: 2rem;">
+                            <h4 style="margin-bottom: 0.75rem;"><i class="fa-solid fa-school" style="color: var(--accent-mint);"></i> รายชื่อชุมนุมในระบบ</h4>
+                            <div class="search-results-table-container">
                             <table class="data-table">
                                 <thead>
                                     <tr>
@@ -378,6 +386,7 @@
                                     <!-- เขียนด้วย JS -->
                                 </tbody>
                             </table>
+                        </div>
                         </div>
                     </div>
 
