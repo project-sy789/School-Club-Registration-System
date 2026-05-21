@@ -554,9 +554,9 @@ function updateQuickVerifyUI() {
                     <option value="">เลือกระดับชั้น/ห้อง...</option>
                 </select>
                 <input type="text" id="quick-level-custom" placeholder="ระบุชั้น/ห้องเรียนเอง เช่น ม.4/5" style="display: none; background: rgba(7,23,15,0.6); border: 1px solid var(--accent-mint); color: white; padding: 8px 10px; border-radius: 8px; font-size: 0.85rem; width: 100%;">
-                <div style="display: flex; gap: 6px; margin-top: 2px;">
-                    <button onclick="saveQuickNewStudent()" style="flex: 1; padding: 9px; font-size: 0.85rem; border-radius: 8px; display: flex; align-items:center; justify-content: center; gap: 6px; background: var(--accent-mint); border: none; color: #07170f; cursor: pointer; font-weight: 700; transition: all 0.2s;"><i class="fa-solid fa-save"></i> บันทึกข้อมูล</button>
-                    <button onclick="cancelQuickNewStudent()" style="padding: 9px 14px; font-size: 0.85rem; border-radius: 8px; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: #fca5a5; cursor: pointer; transition: all 0.2s;">ยกเลิก</button>
+                <div style="display: flex; gap: 6px; margin-top: 2px; flex-wrap: wrap;">
+                    <button onclick="saveQuickNewStudent()" style="flex: 1 1 60%; min-width: 0; padding: 9px; font-size: 0.85rem; border-radius: 8px; display: flex; align-items:center; justify-content: center; gap: 6px; background: var(--accent-mint); border: none; color: #07170f; cursor: pointer; font-weight: 700; transition: all 0.2s;"><i class="fa-solid fa-save"></i> บันทึก</button>
+                    <button onclick="cancelQuickNewStudent()" style="flex: 0 0 auto; padding: 9px 14px; font-size: 0.85rem; border-radius: 8px; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: #fca5a5; cursor: pointer; transition: all 0.2s;">ยกเลิก</button>
                 </div>
             </div>
         `;
@@ -594,7 +594,7 @@ function updateQuickVerifyUI() {
             </div>
             <div class="identity-divider"><span>หรือ</span></div>
             <button onclick="openNewStudentPreRegister()" style="font-size: 0.85rem; padding: 9px 12px; border: 1px dashed var(--accent-mint); color: var(--accent-mint); background: rgba(52,211,153,0.05); width: 100%; display:flex; align-items:center; justify-content: center; gap: 8px; border-radius: 8px; cursor: pointer; transition: all 0.2s; font-weight: 600;" onmouseover="this.style.background='rgba(52,211,153,0.12)'" onmouseout="this.style.background='rgba(52,211,153,0.05)'">
-                <i class="fa-solid fa-user-plus"></i> นักเรียนใหม่ — กรอกประวัติเตรียมจอง
+                <i class="fa-solid fa-user-plus"></i> นักเรียนใหม่ — กรอกประวัติ
             </button>
         `;
     }
