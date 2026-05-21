@@ -41,7 +41,7 @@ CREATE POLICY "Allow public all access to settings" ON settings FOR ALL USING (t
 -- 3. สร้างตารางรายชื่อชุมนุม (Clubs)
 CREATE TABLE clubs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name TEXT NOT NULL,
+    name TEXT NOT NULL UNIQUE,
     teacher TEXT NOT NULL,
     location TEXT NOT NULL,
     description TEXT,

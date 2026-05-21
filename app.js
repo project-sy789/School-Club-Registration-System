@@ -2393,7 +2393,7 @@ async function handleClubsCSVImport(event) {
 
             const { error } = await supabaseClient
                 .from("clubs")
-                .insert(batch);
+                .upsert(batch, { onConflict: 'name' });
 
             if (error) throw error;
 
