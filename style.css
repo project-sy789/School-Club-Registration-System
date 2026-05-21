@@ -294,10 +294,14 @@ nav {
 /* Responsive: stack on small screens */
 @media (max-width: 900px) {
     .hero-banner {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
     }
     .hero-identity-panel {
         order: -1;
+        min-width: 0;
+    }
+    .hero-left {
+        min-width: 0;
     }
 }
 
