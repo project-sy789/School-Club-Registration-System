@@ -1908,26 +1908,184 @@ async function loadStudentsList() {
         if (data && data.length > 0) {
             data.forEach(std => {
                 const row = document.createElement("tr");
+                const safeId = String(std.student_id).replace(/'/g, "\\'");
                 row.innerHTML = `
                     <td><strong>${std.student_id}</strong></td>
                     <td>${std.prefix || "-"}</td>
                     <td>${std.first_name}</td>
                     <td>${std.last_name}</td>
                     <td>${std.level}</td>
+                    <td>
+                        <div style="display:flex; gap:6px; justify-content:center;">
+                            <button onclick="openStudentEditModal('${safeId}')" style="background:rgba(56,189,248,0.15); border:1px solid #38bdf8; color:#38bdf8; padding:4px 9px; border-radius:4px; font-size:0.78rem; cursor:pointer;" title="แก้ไขข้อมูลนักเรียน">
+                                <i class="fa-solid fa-pen-to-square"></i>
+                            </button>
+                            <button onclick="deleteStudentRecord('${safeId}')" style="background:rgba(239,68,68,0.15); border:1px solid #ef4444; color:#ef4444; padding:4px 9px; border-radius:4px; font-size:0.78rem; cursor:pointer;" title="ลบนักเรียนออกจากฐานข้อมูล">
+                                <i class="fa-solid fa-trash-can"></i>
+                            </button>
+                        </div>
+                    </td>
                 `;
                 tbody.appendChild(row);
             });
         } else {
-            tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 1.5rem 0;">ไม่พบข้อมูลนักเรียนที่ตรงตามเงื่อนไขการค้นหา</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 1.5rem 0;">ไม่พบข้อมูลนักเรียนที่ตรงตามเงื่อนไขการค้นหา</td></tr>`;
         }
 
         // ดึงรายการห้องทั้งหมดมาใส่ใน dropdown
         await populateStudentLevelDropdown();
     } catch (e) {
         console.error("Error loading students list:", e);
-        tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--status-danger);">ไม่สามารถดาวน์โหลดรายชื่อจากฐานข้อมูลได้</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--status-danger);">ไม่สามารถดาวน์โหลดรายชื่อจากฐานข้อมูลได้</td></tr>`;
     }
 }
+
+
+// 📝 เปิด Modal แก้ไขข้อมูลนักเรียนในฐานข้อมูลหลัก (students)
+async function openStudentEditModal(studentId) {
+    if (!supabaseClient) return;
+    try {
+        const { data, error } = await supabaseClient
+            .from("students")
+            .select("*")
+            .eq("student_id", studentId)
+            .maybeSingle();
+        if (error) throw error;
+        if (!data) {
+            showToast("ไม่พบนักเรียนรหัสนี้ในฐานข้อมูล", "error");
+            return;
+        }
+
+        document.getElementById("student-edit-original-id").value = data.student_id;
+        document.getElementById("student-edit-id").value = data.student_id;
+        document.getElementById("student-edit-prefix").value = data.prefix || "";
+        document.getElementById("student-edit-first-name").value = data.first_name || "";
+        document.getElementById("student-edit-last-name").value = data.last_name || "";
+        document.getElementById("student-edit-level").value = data.level || "";
+        document.getElementById("student-edit-title").innerText = `แก้ไขข้อมูลนักเรียน: ${data.first_name} ${data.last_name}`;
+
+        document.getElementById("student-edit-modal").classList.add("active");
+    } catch (e) {
+        console.error("Error loading student record:", e);
+        showToast("ไม่สามารถโหลดข้อมูลนักเรียนได้", "error");
+    }
+}
+
+function closeStudentEditModal() {
+    document.getElementById("student-edit-modal").classList.remove("active");
+}
+
+// 💾 บันทึกข้อมูลนักเรียนที่แก้ไขแล้ว
+async function saveStudentRecord() {
+    if (!supabaseClient) return;
+
+    const originalId = document.getElementById("student-edit-original-id").value;
+    const newId = document.getElementById("student-edit-id").value.trim();
+    const prefix = document.getElementById("student-edit-prefix").value;
+    const firstName = document.getElementById("student-edit-first-name").value.trim();
+    const lastName = document.getElementById("student-edit-last-name").value.trim();
+    const level = document.getElementById("student-edit-level").value.trim();
+
+    if (!newId || !firstName || !lastName || !level) {
+        showToast("กรุณากรอกรหัสประจำตัว, ชื่อจริง, นามสกุล และระดับชั้นให้ครบถ้วน", "warning");
+        return;
+    }
+
+    try {
+        // ถ้าเปลี่ยนรหัสประจำตัว ต้องตรวจสอบว่าไม่ชนกับรหัสอื่นในระบบ
+        if (newId !== originalId) {
+            const { data: existing, error: checkErr } = await supabaseClient
+                .from("students")
+                .select("student_id")
+                .eq("student_id", newId)
+                .maybeSingle();
+            if (checkErr) throw checkErr;
+            if (existing) {
+                showToast(`รหัสประจำตัว ${newId} มีอยู่ในระบบแล้ว ไม่สามารถเปลี่ยนซ้ำได้`, "error");
+                return;
+            }
+        }
+
+        const { error } = await supabaseClient
+            .from("students")
+            .update({
+                student_id: newId,
+                prefix: prefix || null,
+                first_name: firstName,
+                last_name: lastName,
+                level: level
+            })
+            .eq("student_id", originalId);
+
+        if (error) throw error;
+
+        // เขียน Audit Log
+        try {
+            const ipAddress = await getUserIpAddress();
+            await supabaseClient.from("audit_logs").insert({
+                student_id: newId,
+                student_name: `${prefix || ""}${firstName} ${lastName}`,
+                action: "SETTINGS_UPDATED",
+                ip_address: ipAddress,
+                user_agent: navigator.userAgent || "Unknown Device",
+                details: `ผู้ดูแลระบบแก้ไขข้อมูลนักเรียนในฐานข้อมูลหลัก (เดิม=${originalId}, ใหม่=${newId}, ชั้น=${level})`
+            });
+        } catch (logErr) {
+            console.error("Audit log error:", logErr);
+        }
+
+        showToast("บันทึกข้อมูลนักเรียนสำเร็จ", "success");
+        closeStudentEditModal();
+        hasPopulatedStudentLevels = false; // รีเฟรช dropdown ห้องเรียนเผื่อมีห้องใหม่
+        loadStudentsList();
+    } catch (e) {
+        console.error("Error saving student record:", e);
+        showToast("ไม่สามารถบันทึกข้อมูลนักเรียนได้: " + (e.message || e), "error");
+    }
+}
+
+// 🗑️ ลบนักเรียนออกจากฐานข้อมูลหลัก
+async function deleteStudentRecord(studentId) {
+    if (!supabaseClient) return;
+
+    if (!confirm(`คุณแน่ใจหรือไม่ว่าต้องการลบนักเรียนรหัส "${studentId}" ออกจากฐานข้อมูล?\n\n⚠️ การดำเนินการนี้จะลบเฉพาะข้อมูลในตารางนักเรียน (students) เท่านั้น ไม่ส่งผลต่อประวัติการลงทะเบียนชุมนุม (registrations) ที่อ้างอิงรหัสนี้`)) {
+        return;
+    }
+
+    try {
+        const { error } = await supabaseClient
+            .from("students")
+            .delete()
+            .eq("student_id", studentId);
+
+        if (error) throw error;
+
+        // เขียน Audit Log
+        try {
+            const ipAddress = await getUserIpAddress();
+            await supabaseClient.from("audit_logs").insert({
+                student_id: studentId,
+                action: "SETTINGS_UPDATED",
+                ip_address: ipAddress,
+                user_agent: navigator.userAgent || "Unknown Device",
+                details: `ผู้ดูแลระบบลบนักเรียนรหัส "${studentId}" ออกจากฐานข้อมูลหลัก`
+            });
+        } catch (logErr) {
+            console.error("Audit log error:", logErr);
+        }
+
+        showToast(`ลบนักเรียนรหัส ${studentId} เรียบร้อยแล้ว`, "info");
+        loadStudentsList();
+    } catch (e) {
+        console.error("Error deleting student:", e);
+        showToast("ไม่สามารถลบนักเรียนได้: " + (e.message || e), "error");
+    }
+}
+
+window.openStudentEditModal = openStudentEditModal;
+window.closeStudentEditModal = closeStudentEditModal;
+window.saveStudentRecord = saveStudentRecord;
+window.deleteStudentRecord = deleteStudentRecord;
 
 
 // 🟢 อัปโหลดรายชื่อเด็ก bulk import ผ่านหน้าบ้าน CSV/Excel

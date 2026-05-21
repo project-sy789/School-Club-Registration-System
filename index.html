@@ -430,11 +430,12 @@
                                             <th>ชื่อจริง</th>
                                             <th>นามสกุล</th>
                                             <th>ห้องเรียน</th>
+                                            <th style="width: 110px; text-align:center;">การจัดการ</th>
                                         </tr>
                                     </thead>
                                     <tbody id="admin-students-list-tbody">
                                         <tr>
-                                            <td colspan="5" style="text-align: center; color: var(--text-muted);">ไม่พบรายชื่อในฐานข้อมูล หรือกำลังดาวน์โหลด...</td>
+                                            <td colspan="6" style="text-align: center; color: var(--text-muted);">ไม่พบรายชื่อในฐานข้อมูล หรือกำลังดาวน์โหลด...</td>
                                         </tr>
                                     </tbody>
                                 </table>
@@ -952,6 +953,59 @@
     <div class="toast-notification" id="toast-notify">
         <i class="fa-solid fa-circle-info" id="toast-icon"></i>
         <span id="toast-message">ข้อความแจ้งเตือน</span>
+    </div>
+
+    <!-- ✏️ Student Record Edit Modal (หน้าต่างแก้ไขข้อมูลนักเรียนในฐานข้อมูล) -->
+    <div class="modal-overlay" id="student-edit-modal">
+        <div class="modal-card glass-container" style="max-width: 560px;">
+            <button class="modal-close" onclick="closeStudentEditModal()"><i class="fa-solid fa-xmark"></i></button>
+            <div class="modal-title" id="student-edit-title">แก้ไขข้อมูลนักเรียน</div>
+            <div class="modal-subtitle">ปรับปรุงข้อมูลนักเรียนในฐานข้อมูลหลัก (ตาราง students)</div>
+
+            <input type="hidden" id="student-edit-original-id">
+
+            <div class="modal-form" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem;">
+                <div class="input-group" style="grid-column: span 2;">
+                    <label for="student-edit-id">เลขประจำตัวนักเรียน</label>
+                    <input type="text" id="student-edit-id" placeholder="เช่น 10001">
+                </div>
+
+                <div class="input-group">
+                    <label for="student-edit-prefix">คำนำหน้า</label>
+                    <select id="student-edit-prefix">
+                        <option value="">- เลือก -</option>
+                        <option value="เด็กชาย">เด็กชาย</option>
+                        <option value="เด็กหญิง">เด็กหญิง</option>
+                        <option value="นาย">นาย</option>
+                        <option value="นางสาว">นางสาว</option>
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label for="student-edit-level">ระดับชั้น/ห้อง</label>
+                    <input type="text" id="student-edit-level" placeholder="เช่น ม.1/1">
+                </div>
+
+                <div class="input-group">
+                    <label for="student-edit-first-name">ชื่อจริง</label>
+                    <input type="text" id="student-edit-first-name" placeholder="ชื่อจริง">
+                </div>
+
+                <div class="input-group">
+                    <label for="student-edit-last-name">นามสกุล</label>
+                    <input type="text" id="student-edit-last-name" placeholder="นามสกุล">
+                </div>
+            </div>
+
+            <div style="display:flex; gap:10px; margin-top:1.5rem; justify-content:flex-end;">
+                <button class="btn-secondary" onclick="closeStudentEditModal()">
+                    <i class="fa-solid fa-xmark"></i> ยกเลิก
+                </button>
+                <button class="btn-primary" onclick="saveStudentRecord()">
+                    <i class="fa-solid fa-floppy-disk"></i> บันทึกการแก้ไข
+                </button>
+            </div>
+        </div>
     </div>
 
     <!-- 💻 6. Javascript Logic Engine -->
