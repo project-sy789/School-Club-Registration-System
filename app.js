@@ -1975,7 +1975,19 @@ function closeStudentEditModal() {
     document.getElementById("student-edit-modal").classList.remove("active");
 }
 
-// 💾 บันทึกข้อมูลนักเรียนที่แก้ไขแล้ว
+// ➕ เปิด Modal สำหรับเพิ่มนักเรียนใหม่ (ใช้ modal เดียวกันแต่โหมด create)
+function openStudentCreateModal() {
+    document.getElementById("student-edit-original-id").value = "";
+    document.getElementById("student-edit-id").value = "";
+    document.getElementById("student-edit-prefix").value = "";
+    document.getElementById("student-edit-first-name").value = "";
+    document.getElementById("student-edit-last-name").value = "";
+    document.getElementById("student-edit-level").value = "";
+    document.getElementById("student-edit-title").innerText = "เพิ่มนักเรียนใหม่เข้าฐานข้อมูล";
+    document.getElementById("student-edit-modal").classList.add("active");
+}
+
+// 💾 บันทึกข้อมูลนักเรียน (รองรับทั้งโหมดเพิ่มใหม่และแก้ไข)
 async function saveStudentRecord() {
     if (!supabaseClient) return;
 
@@ -1991,9 +2003,11 @@ async function saveStudentRecord() {
         return;
     }
 
+    const isCreateMode = !originalId;
+
     try {
-        // ถ้าเปลี่ยนรหัสประจำตัว ต้องตรวจสอบว่าไม่ชนกับรหัสอื่นในระบบ
-        if (newId !== originalId) {
+        // ตรวจสอบรหัสซ้ำ: เมื่อสร้างใหม่ หรือแก้ไขแล้วเปลี่ยน student_id
+        if (isCreateMode || newId !== originalId) {
             const { data: existing, error: checkErr } = await supabaseClient
                 .from("students")
                 .select("student_id")
@@ -2001,23 +2015,35 @@ async function saveStudentRecord() {
                 .maybeSingle();
             if (checkErr) throw checkErr;
             if (existing) {
-                showToast(`รหัสประจำตัว ${newId} มีอยู่ในระบบแล้ว ไม่สามารถเปลี่ยนซ้ำได้`, "error");
+                showToast(`รหัสประจำตัว ${newId} มีอยู่ในระบบแล้ว ไม่สามารถใช้ซ้ำได้`, "error");
                 return;
             }
         }
 
-        const { error } = await supabaseClient
-            .from("students")
-            .update({
-                student_id: newId,
-                prefix: prefix || null,
-                first_name: firstName,
-                last_name: lastName,
-                level: level
-            })
-            .eq("student_id", originalId);
-
-        if (error) throw error;
+        if (isCreateMode) {
+            const { error } = await supabaseClient
+                .from("students")
+                .insert([{
+                    student_id: newId,
+                    prefix: prefix || null,
+                    first_name: firstName,
+                    last_name: lastName,
+                    level: level
+                }]);
+            if (error) throw error;
+        } else {
+            const { error } = await supabaseClient
+                .from("students")
+                .update({
+                    student_id: newId,
+                    prefix: prefix || null,
+                    first_name: firstName,
+                    last_name: lastName,
+                    level: level
+                })
+                .eq("student_id", originalId);
+            if (error) throw error;
+        }
 
         // เขียน Audit Log
         try {
@@ -2028,15 +2054,17 @@ async function saveStudentRecord() {
                 action: "SETTINGS_UPDATED",
                 ip_address: ipAddress,
                 user_agent: navigator.userAgent || "Unknown Device",
-                details: `ผู้ดูแลระบบแก้ไขข้อมูลนักเรียนในฐานข้อมูลหลัก (เดิม=${originalId}, ใหม่=${newId}, ชั้น=${level})`
+                details: isCreateMode
+                    ? `ผู้ดูแลระบบเพิ่มนักเรียนใหม่ในฐานข้อมูลหลัก (รหัส=${newId}, ชั้น=${level})`
+                    : `ผู้ดูแลระบบแก้ไขข้อมูลนักเรียนในฐานข้อมูลหลัก (เดิม=${originalId}, ใหม่=${newId}, ชั้น=${level})`
             });
         } catch (logErr) {
             console.error("Audit log error:", logErr);
         }
 
-        showToast("บันทึกข้อมูลนักเรียนสำเร็จ", "success");
+        showToast(isCreateMode ? "เพิ่มนักเรียนใหม่สำเร็จ" : "บันทึกข้อมูลนักเรียนสำเร็จ", "success");
         closeStudentEditModal();
-        hasPopulatedStudentLevels = false; // รีเฟรช dropdown ห้องเรียนเผื่อมีห้องใหม่
+        hasPopulatedStudentLevels = false;
         loadStudentsList();
     } catch (e) {
         console.error("Error saving student record:", e);
@@ -2084,6 +2112,7 @@ async function deleteStudentRecord(studentId) {
 
 window.openStudentEditModal = openStudentEditModal;
 window.closeStudentEditModal = closeStudentEditModal;
+window.openStudentCreateModal = openStudentCreateModal;
 window.saveStudentRecord = saveStudentRecord;
 window.deleteStudentRecord = deleteStudentRecord;
 
