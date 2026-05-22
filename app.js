@@ -2319,10 +2319,16 @@ async function handleStudentCSVImport(event) {
             populateRegistrationLevelDropdown(true);
         } catch (err) {
             console.error("Error importing bulk data:", err);
-            showToast("เกิดข้อผิดพลาดในการ Bulk อัปเดตรายชื่อนักเรียน", "error");
+            const detail = err?.message || err?.hint || err?.details || '';
+            const isMissingPrefix = /column .*prefix.* does not exist/i.test(detail);
+            if (isMissingPrefix) {
+                showToast("ฐานข้อมูลยังไม่มีคอลัมน์ prefix — กรุณารัน supabase/migrate_add_student_prefix.sql ใน Supabase SQL Editor", "error");
+            } else {
+                showToast(`เกิดข้อผิดพลาดในการ Bulk อัปเดตรายชื่อนักเรียน${detail ? ': ' + detail : ''}`, "error");
+            }
         }
     };
-    
+
     reader.readAsArrayBuffer(file);
 }
 
