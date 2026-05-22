@@ -1776,7 +1776,7 @@ async function populateRegistrationLevelDropdown(force = false) {
         if (error) throw error;
         
         if (data && data.length > 0) {
-            const levels = [...new Set(data.map(item => item.level).filter(Boolean))];
+            const levels = [...new Set(data.map(item => item.level?.trim()).filter(Boolean))];
             // จัดเรียงระดับชั้น/ห้อง (เช่น ม.1/1, ม.1/2)
             levels.sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
             
@@ -1951,7 +1951,7 @@ async function populateStudentLevelDropdown() {
         if (error) throw error;
         
         if (data) {
-            const levels = [...new Set(data.map(item => item.level).filter(Boolean))];
+            const levels = [...new Set(data.map(item => item.level?.trim()).filter(Boolean))];
             // จัดเรียงระดับชั้น/ห้อง (เช่น ม.1/1, ม.1/2)
             levels.sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
             
@@ -1983,7 +1983,7 @@ async function loadStudentsList() {
     if (!supabaseClient) return;
     const tbody = document.getElementById("admin-students-list-tbody");
     const searchVal = document.getElementById("admin-student-search-input")?.value.trim() || "";
-    const levelVal = document.getElementById("admin-student-level-filter")?.value || "";
+    const levelVal = (document.getElementById("admin-student-level-filter")?.value || "").trim();
     
     try {
         let query = supabaseClient.from("students").select("*");
