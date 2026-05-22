@@ -2305,12 +2305,24 @@ async function handleStudentCSVImport(event) {
                 return;
             }
 
-            showToast(`กำลังส่งข้อมูลจำนวน ${batch.length} คน เข้าสู่ระบบฐานข้อมูล...`, "info");
+            // ป้องกัน student_id ซ้ำในไฟล์เดียว (Postgres ON CONFLICT DO UPDATE จะ error 21000 ถ้ามี key ซ้ำในชุดเดียวกัน)
+            // เก็บแถวสุดท้ายของแต่ละรหัสไว้
+            const dedupedMap = new Map();
+            for (const row of batch) {
+                dedupedMap.set(row.student_id, row);
+            }
+            const dedupedBatch = Array.from(dedupedMap.values());
+            const duplicateCount = batch.length - dedupedBatch.length;
+
+            const toastMsg = duplicateCount > 0
+                ? `กำลังส่งข้อมูลจำนวน ${dedupedBatch.length} คน (ตัดรหัสซ้ำในไฟล์ออก ${duplicateCount} แถว)...`
+                : `กำลังส่งข้อมูลจำนวน ${dedupedBatch.length} คน เข้าสู่ระบบฐานข้อมูล...`;
+            showToast(toastMsg, "info");
 
             // อัปเดตเข้ารายชื่อ (ใช้ Upsert เพื่อทับรายชื่อเดิมหากเลขซ้ำ)
             const { error } = await supabaseClient
                 .from("students")
-                .upsert(batch, { onConflict: 'student_id' });
+                .upsert(dedupedBatch, { onConflict: 'student_id' });
 
             if (error) throw error;
 
