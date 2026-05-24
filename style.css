@@ -949,21 +949,14 @@ input[type="checkbox"]:checked + .toggle-switch::after {
     opacity: 0.8;
 }
 
-/* Multi-column layout for teacher and location */
+/* Single-frame layout for teacher and location */
 .modal-club-details div:last-child {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
+    display: flex;
+    flex-direction: column;
     gap: 8px;
     font-size: 0.85rem !important;
     color: var(--text-secondary) !important;
     margin-top: 2px;
-}
-
-@media (max-width: 480px) {
-    .modal-club-details div:last-child {
-        grid-template-columns: 1fr;
-        gap: 6px;
-    }
 }
 
 .modal-club-details div:last-child span {
