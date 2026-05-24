@@ -17,6 +17,7 @@ let state = {
     },
     currentClub: null,
     currentStudentInfo: null, // เก็บรายชื่อเด็กดึงจาก DB
+    myRegistrations: [], // การลงทะเบียนของนักเรียนที่ระบุตัวตนในเทอมปัจจุบัน
     isAdminLoggedIn: false,
     activeTab: 'home',
     activeAdminSubTab: 'stats',
@@ -418,7 +419,7 @@ function renderClubsGrid() {
     filtered.forEach(club => {
         const isFull = club.enrolled_count >= club.capacity;
         const pct = Math.min(100, Math.round((club.enrolled_count / club.capacity) * 100));
-        
+
         // สีของ Progress Bar
         let pctClass = "normal";
         if (pct >= 90) pctClass = "danger";
@@ -427,9 +428,22 @@ function renderClubsGrid() {
         // รวบรวมรายชื่อระดับชั้นมาแสดงเป็น Badge
         const gradeBadgesHtml = club.grades.map(g => `<span class="grade-badge">${g}</span>`).join(" ");
 
+        // เช็คว่านักเรียนคนนี้ลงทะเบียนแล้วหรือยัง (ในเทอมปัจจุบัน)
+        const myRegs = state.myRegistrations || [];
+        const myRegInThisClub = myRegs.find(r => r.club_id === club.id);
+        const hasRegisteredAnywhere = myRegs.length > 0;
+
         // เช็คการปิดรับของปุ่ม
         let btnHtml = "";
-        if (!systemOpen) {
+        if (myRegInThisClub) {
+            // ลงทะเบียนชุมนุมนี้แล้ว
+            btnHtml = `<button class="register-btn active" disabled style="background: rgba(16, 185, 129, 0.15); color: var(--accent-mint); border: 1px solid rgba(52, 211, 153, 0.4); cursor: not-allowed; opacity: 0.95;"><i class="fa-solid fa-circle-check"></i> ลงทะเบียนชุมนุมนี้แล้ว</button>`;
+        } else if (hasRegisteredAnywhere) {
+            // ลงชุมนุมอื่นไปแล้ว — ห้ามลงเพิ่ม (DB กันไว้)
+            const otherClubName = (myRegs[0].clubs && myRegs[0].clubs.name) ? myRegs[0].clubs.name : "ชุมนุมอื่น";
+            const safeOther = otherClubName.replace(/"/g, "&quot;");
+            btnHtml = `<button class="register-btn closed" disabled title="คุณได้ลงทะเบียน &quot;${safeOther}&quot; ในเทอมนี้แล้ว"><i class="fa-solid fa-lock"></i> ลงชุมนุมอื่นแล้ว</button>`;
+        } else if (!systemOpen) {
             btnHtml = `<button class="register-btn closed" disabled><i class="fa-solid fa-lock"></i> ยังไม่เปิดให้ลงทะเบียน</button>`;
         } else if (isFull) {
             btnHtml = `<button class="register-btn full" disabled><i class="fa-solid fa-ban"></i> ที่นั่งเต็มแล้ว</button>`;
@@ -716,16 +730,19 @@ window.updateQuickVerifyUI = updateQuickVerifyUI;
 // 🎟️ แสดงผลการลงทะเบียนของนักเรียนที่ยืนยันตัวตนแล้ว ใต้การ์ดระบุตัวตนบน hero
 async function renderMyRegistrations() {
     const card = document.getElementById("my-registrations-card");
-    if (!card) return;
     const info = state.currentStudentInfo;
     if (!info) {
-        card.style.display = "none";
-        card.innerHTML = "";
+        state.myRegistrations = [];
+        if (card) {
+            card.style.display = "none";
+            card.innerHTML = "";
+        }
+        renderClubsGrid();
         return;
     }
 
     if (!supabaseClient) {
-        card.style.display = "none";
+        if (card) card.style.display = "none";
         return;
     }
 
@@ -748,9 +765,14 @@ async function renderMyRegistrations() {
         const { data, error } = await query.order("created_at", { ascending: true });
         if (error) throw error;
 
+        state.myRegistrations = data || [];
+
         if (!data || data.length === 0) {
-            card.style.display = "none";
-            card.innerHTML = "";
+            if (card) {
+                card.style.display = "none";
+                card.innerHTML = "";
+            }
+            renderClubsGrid();
             return;
         }
 
@@ -775,20 +797,28 @@ async function renderMyRegistrations() {
             `;
         }).join("");
 
-        card.innerHTML = `
-            <div class="identity-card" style="padding: 14px;">
-                <div class="identity-card-header" style="color: var(--accent-mint); margin-bottom: 8px;">
-                    <i class="fa-solid fa-circle-check"></i>
-                    <span>ผลการลงทะเบียนของฉัน · ภาคเรียนที่ ${semester}/${academic_year}</span>
+        if (card) {
+            card.innerHTML = `
+                <div class="identity-card" style="padding: 14px;">
+                    <div class="identity-card-header" style="color: var(--accent-mint); margin-bottom: 8px;">
+                        <i class="fa-solid fa-circle-check"></i>
+                        <span>ผลการลงทะเบียนของฉัน · ภาคเรียนที่ ${semester}/${academic_year}</span>
+                    </div>
+                    <div style="display:flex; flex-direction:column; gap:8px;">${itemsHtml}</div>
                 </div>
-                <div style="display:flex; flex-direction:column; gap:8px;">${itemsHtml}</div>
-            </div>
-        `;
-        card.style.display = "block";
+            `;
+            card.style.display = "block";
+        }
+
+        renderClubsGrid();
     } catch (e) {
         console.warn("Failed to load my registrations:", e);
-        card.style.display = "none";
-        card.innerHTML = "";
+        state.myRegistrations = [];
+        if (card) {
+            card.style.display = "none";
+            card.innerHTML = "";
+        }
+        renderClubsGrid();
     }
 }
 window.renderMyRegistrations = renderMyRegistrations;
