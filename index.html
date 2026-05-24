@@ -420,15 +420,20 @@
                         <div style="margin-top: 2rem;">
                             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom: 0.75rem;">
                                 <h4 style="margin: 0;"><i class="fa-solid fa-database" style="color: var(--accent-mint);"></i> ฐานข้อมูลนักเรียนปัจจุบัน</h4>
-                                <button class="btn-primary" style="padding: 7px 14px; font-size: 0.85rem;" onclick="openStudentCreateModal()">
-                                    <i class="fa-solid fa-user-plus"></i> เพิ่มนักเรียนใหม่
-                                </button>
+                                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                                    <button class="btn-small-success" style="padding: 7px 14px; font-size: 0.85rem;" onclick="exportUnregisteredStudentsToCSV()" title="ส่งออกรายชื่อนักเรียนที่ยังไม่ได้ลงทะเบียนชุมนุมในเทอมปัจจุบัน">
+                                        <i class="fa-solid fa-file-csv"></i> ส่งออกรายชื่อยังไม่ลงทะเบียน
+                                    </button>
+                                    <button class="btn-primary" style="padding: 7px 14px; font-size: 0.85rem;" onclick="openStudentCreateModal()">
+                                        <i class="fa-solid fa-user-plus"></i> เพิ่มนักเรียนใหม่
+                                    </button>
+                                </div>
                             </div>
-                            
+
                             <!-- 🔍 ส่วนตัวกรองฐานข้อมูลนักเรียน -->
                             <div style="display: flex; gap: 12px; margin-bottom: 15px; flex-wrap: wrap; align-items: center;">
                                 <div style="flex: 1; min-width: 250px; position: relative;">
-                                    <input type="text" id="admin-student-search-input" placeholder="ค้นหารหัสประจำตัว หรือชื่อ-นามสกุล..." 
+                                    <input type="text" id="admin-student-search-input" placeholder="ค้นหารหัสประจำตัว หรือชื่อ-นามสกุล..."
                                            onkeyup="filterAdminStudentsList()"
                                            style="width: 100%; background: rgba(7, 23, 15, 0.7); border: var(--border-glass); color: var(--text-primary); padding: 8px 12px 8px 36px; border-radius: 6px; font-size: 0.9rem;">
                                     <i class="fa-solid fa-magnifying-glass" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-secondary); font-size: 0.85rem;"></i>
@@ -436,6 +441,13 @@
                                 <select id="admin-student-level-filter" onchange="filterAdminStudentsList()"
                                         style="background: #0d281a; border: var(--border-glass); color: var(--text-primary); padding: 8px 12px; border-radius: 6px; font-size: 0.9rem; width: 200px; height: 38px;">
                                     <option value="" style="background: #0d281a; color: var(--text-primary);">-- เลือกห้องเรียนทั้งหมด --</option>
+                                </select>
+                                <select id="admin-student-reg-filter" onchange="filterAdminStudentsList()"
+                                        style="background: #0d281a; border: var(--border-glass); color: var(--text-primary); padding: 8px 12px; border-radius: 6px; font-size: 0.9rem; width: 200px; height: 38px;"
+                                        title="กรองตามสถานะการลงทะเบียนชุมนุมในเทอมปัจจุบัน">
+                                    <option value="all" style="background: #0d281a; color: var(--text-primary);">-- สถานะทั้งหมด --</option>
+                                    <option value="registered" style="background: #0d281a; color: var(--text-primary);">✅ ลงทะเบียนแล้ว</option>
+                                    <option value="not_registered" style="background: #0d281a; color: var(--text-primary);">⚠️ ยังไม่ลงทะเบียน</option>
                                 </select>
                             </div>
 
@@ -448,12 +460,13 @@
                                             <th>ชื่อจริง</th>
                                             <th>นามสกุล</th>
                                             <th>ห้องเรียน</th>
+                                            <th>สถานะลงทะเบียน</th>
                                             <th style="width: 110px; text-align:center;">การจัดการ</th>
                                         </tr>
                                     </thead>
                                     <tbody id="admin-students-list-tbody">
                                         <tr>
-                                            <td colspan="6" style="text-align: center; color: var(--text-muted);">ไม่พบรายชื่อในฐานข้อมูล หรือกำลังดาวน์โหลด...</td>
+                                            <td colspan="7" style="text-align: center; color: var(--text-muted);">ไม่พบรายชื่อในฐานข้อมูล หรือกำลังดาวน์โหลด...</td>
                                         </tr>
                                     </tbody>
                                 </table>

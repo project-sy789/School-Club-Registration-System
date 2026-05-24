@@ -1984,10 +1984,11 @@ async function loadStudentsList() {
     const tbody = document.getElementById("admin-students-list-tbody");
     const searchVal = document.getElementById("admin-student-search-input")?.value.trim() || "";
     const levelVal = (document.getElementById("admin-student-level-filter")?.value || "").trim();
-    
+    const regFilter = (document.getElementById("admin-student-reg-filter")?.value || "all").trim();
+
     try {
         let query = supabaseClient.from("students").select("*");
-        
+
         if (searchVal) {
             // หากเป็นตัวเลขล้วนให้ค้นหารหัสประจำตัวนักเรียน
             if (/^\d+$/.test(searchVal)) {
@@ -1996,28 +1997,55 @@ async function loadStudentsList() {
                 query = query.or(`first_name.ilike.%${searchVal}%,last_name.ilike.%${searchVal}%`);
             }
         }
-        
+
         if (levelVal) {
             query = query.eq("level", levelVal);
         }
-        
+
+        // เมื่อกรองตามสถานะลงทะเบียน ต้องดึงให้ครบเพื่อ join กับ registrations แล้วค่อยตัด 100
+        const limitWhenRegFilter = 1000;
+        const limitDefault = 100;
         const { data, error } = await query
             .order("student_id", { ascending: true })
-            .limit(100); // แสดงพรีวิวสูงสุด 100 รายการแรก
+            .limit(regFilter === "all" ? limitDefault : limitWhenRegFilter);
 
         if (error) throw error;
 
+        // ดึง registrations ของเทอมปัจจุบัน เพื่อแมปสถานะของนักเรียนแต่ละคน
+        const regMap = await getCurrentTermRegistrationMap();
+
+        let rows = data || [];
+        if (regFilter === "registered") {
+            rows = rows.filter(s => regMap.has(String(s.student_id)));
+        } else if (regFilter === "not_registered") {
+            rows = rows.filter(s => !regMap.has(String(s.student_id)));
+        }
+        // จำกัด 100 หลัง filter เพื่อให้สอดคล้องกับโหมดปกติ
+        if (regFilter !== "all" && rows.length > limitDefault) {
+            rows = rows.slice(0, limitDefault);
+        }
+
         tbody.innerHTML = "";
-        if (data && data.length > 0) {
-            data.forEach(std => {
+        if (rows.length > 0) {
+            rows.forEach(std => {
                 const row = document.createElement("tr");
                 const safeId = String(std.student_id).replace(/'/g, "\\'");
+                const reg = regMap.get(String(std.student_id));
+                let statusHtml;
+                if (reg) {
+                    const clubName = reg.club_name || "ไม่ระบุชุมนุม";
+                    const safeClub = clubName.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                    statusHtml = `<span style="display:inline-block; background:rgba(16,185,129,0.15); color:var(--accent-mint); border:1px solid rgba(16,185,129,0.3); padding:3px 8px; border-radius:10px; font-size:0.78rem; font-weight:600;" title="${safeClub}">✅ ${safeClub}</span>`;
+                } else {
+                    statusHtml = `<span style="display:inline-block; background:rgba(245,158,11,0.15); color:#fbbf24; border:1px solid rgba(245,158,11,0.3); padding:3px 8px; border-radius:10px; font-size:0.78rem; font-weight:600;">⚠️ ยังไม่ลงทะเบียน</span>`;
+                }
                 row.innerHTML = `
                     <td><strong>${std.student_id}</strong></td>
                     <td>${std.prefix || "-"}</td>
                     <td>${std.first_name}</td>
                     <td>${std.last_name}</td>
                     <td>${std.level}</td>
+                    <td>${statusHtml}</td>
                     <td>
                         <div style="display:flex; gap:6px; justify-content:center;">
                             <button onclick="openStudentEditModal('${safeId}')" style="background:rgba(56,189,248,0.15); border:1px solid #38bdf8; color:#38bdf8; padding:4px 9px; border-radius:4px; font-size:0.78rem; cursor:pointer;" title="แก้ไขข้อมูลนักเรียน">
@@ -2032,16 +2060,93 @@ async function loadStudentsList() {
                 tbody.appendChild(row);
             });
         } else {
-            tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 1.5rem 0;">ไม่พบข้อมูลนักเรียนที่ตรงตามเงื่อนไขการค้นหา</td></tr>`;
+            const emptyMsg = regFilter === "registered"
+                ? "ไม่พบนักเรียนที่ลงทะเบียนชุมนุมในเทอมปัจจุบันตามเงื่อนไขการค้นหา"
+                : regFilter === "not_registered"
+                    ? "ไม่พบนักเรียนที่ยังไม่ลงทะเบียนตามเงื่อนไขการค้นหา"
+                    : "ไม่พบข้อมูลนักเรียนที่ตรงตามเงื่อนไขการค้นหา";
+            tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 1.5rem 0;">${emptyMsg}</td></tr>`;
         }
 
         // ดึงรายการห้องทั้งหมดมาใส่ใน dropdown
         await populateStudentLevelDropdown();
     } catch (e) {
         console.error("Error loading students list:", e);
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--status-danger);">ไม่สามารถดาวน์โหลดรายชื่อจากฐานข้อมูลได้</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--status-danger);">ไม่สามารถดาวน์โหลดรายชื่อจากฐานข้อมูลได้</td></tr>`;
     }
 }
+
+// 🗂️ ดึงการลงทะเบียนของเทอมปัจจุบันมาเป็น Map: student_id -> { club_name }
+// ใช้สำหรับแสดงสถานะ "ลงทะเบียนแล้ว / ยังไม่ลงทะเบียน" บนตารางนักเรียน
+async function getCurrentTermRegistrationMap() {
+    const map = new Map();
+    if (!supabaseClient) return map;
+    const { academic_year, semester } = getCurrentTerm();
+    const { data, error } = await supabaseClient
+        .from("registrations")
+        .select("student_id, clubs(name)")
+        .eq("academic_year", academic_year)
+        .eq("semester", semester);
+    if (error) {
+        console.warn("Failed to load current-term registrations for status map:", error);
+        return map;
+    }
+    (data || []).forEach(r => {
+        if (!r.student_id) return;
+        const key = String(r.student_id);
+        if (!map.has(key)) {
+            map.set(key, { club_name: r.clubs ? r.clubs.name : null });
+        }
+    });
+    return map;
+}
+
+// 📥 ส่งออก CSV รายชื่อนักเรียนที่ "ยังไม่ได้ลงทะเบียนชุมนุม" ในเทอมปัจจุบัน (เคารพตัวกรองห้องเรียน + คำค้นหา)
+async function exportUnregisteredStudentsToCSV() {
+    if (!supabaseClient) {
+        showToast("ยังเชื่อมต่อฐานข้อมูลไม่สำเร็จ", "error");
+        return;
+    }
+    showToast("กำลังเตรียมไฟล์รายชื่อยังไม่ลงทะเบียน...", "info");
+    try {
+        const searchVal = document.getElementById("admin-student-search-input")?.value.trim() || "";
+        const levelVal = (document.getElementById("admin-student-level-filter")?.value || "").trim();
+
+        let query = supabaseClient.from("students").select("*");
+        if (searchVal) {
+            if (/^\d+$/.test(searchVal)) {
+                query = query.ilike("student_id", `%${searchVal}%`);
+            } else {
+                query = query.or(`first_name.ilike.%${searchVal}%,last_name.ilike.%${searchVal}%`);
+            }
+        }
+        if (levelVal) {
+            query = query.eq("level", levelVal);
+        }
+        const { data, error } = await query.order("level", { ascending: true }).order("student_id", { ascending: true });
+        if (error) throw error;
+
+        const regMap = await getCurrentTermRegistrationMap();
+        const unregistered = (data || []).filter(s => !regMap.has(String(s.student_id)));
+
+        if (unregistered.length === 0) {
+            showToast("ไม่มีรายชื่อนักเรียนที่ยังไม่ลงทะเบียนตามเงื่อนไขปัจจุบัน", "warning");
+            return;
+        }
+
+        const term = getCurrentTerm();
+        let csvContent = "เลขประจำตัวนักเรียน,คำนำหน้า,ชื่อ,นามสกุล,ระดับชั้น/ห้อง\n";
+        unregistered.forEach(s => {
+            csvContent += `"${s.student_id}","${s.prefix || ""}","${s.first_name || ""}","${s.last_name || ""}","${s.level || ""}"\n`;
+        });
+
+        downloadCSVFile(csvContent, `รายชื่อนักเรียนยังไม่ลงทะเบียน_เทอม${term.semester}-${term.academic_year}.csv`);
+    } catch (e) {
+        console.error("Error exporting unregistered students:", e);
+        showToast("ส่งออกรายชื่อยังไม่ลงทะเบียนไม่สำเร็จ: " + (e.message || e), "error");
+    }
+}
+window.exportUnregisteredStudentsToCSV = exportUnregisteredStudentsToCSV;
 
 
 // 📝 เปิด Modal แก้ไขข้อมูลนักเรียนในฐานข้อมูลหลัก (students)
