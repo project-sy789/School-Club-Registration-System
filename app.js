@@ -524,9 +524,10 @@ async function quickVerifyStudent() {
             updateQuickVerifyUI();
 
             showToast(`ยินดีต้อนรับคุณ ${data.prefix || ""}${data.first_name} ${data.last_name} (${data.level})! ระบบคัดกรองระดับชั้น ${levelPrefix} ให้โดยอัตโนมัติแล้ว`, "success");
-            
+
             // รีเรนเดอร์บอร์ดแสดงรายชื่อชุมนุมใหม่
             renderClubsGrid();
+            renderMyRegistrations();
         } else {
             showToast("ไม่พบรหัสประจำตัว กรุณาตรวจสอบอีกครั้ง หรือคลิกปุ่มนักเรียนใหม่ด้านล่างเพื่อเตรียมความพร้อม", "warning");
             state.currentStudentInfo = null;
@@ -682,6 +683,7 @@ function saveQuickNewStudent() {
     updateQuickVerifyUI();
     showToast("เตรียมข้อมูลสำเร็จ! ระบบจำชื่อคุณไว้แล้ว เมื่อถึงเวลาสามารถกดลงทะเบียนชุมนุมได้ทันที", "success");
     renderClubsGrid();
+    renderMyRegistrations();
 }
 
 function cancelQuickNewStudent() {
@@ -703,12 +705,93 @@ function clearStudentVerification() {
     
     updateQuickVerifyUI();
     renderClubsGrid();
+    renderMyRegistrations();
     showToast("ยกเลิกการยืนยันตัวตน เรียบร้อยแล้ว", "info");
 }
 
 // ผูกฟังก์ชันเข้ากับ Global window เพื่อให้กดเรียกใช้งานได้เสมอในทุกเบราวเซอร์ (เช่น Safari WebKit)
 window.clearStudentVerification = clearStudentVerification;
 window.updateQuickVerifyUI = updateQuickVerifyUI;
+
+// 🎟️ แสดงผลการลงทะเบียนของนักเรียนที่ยืนยันตัวตนแล้ว ใต้การ์ดระบุตัวตนบน hero
+async function renderMyRegistrations() {
+    const card = document.getElementById("my-registrations-card");
+    if (!card) return;
+    const info = state.currentStudentInfo;
+    if (!info) {
+        card.style.display = "none";
+        card.innerHTML = "";
+        return;
+    }
+
+    if (!supabaseClient) {
+        card.style.display = "none";
+        return;
+    }
+
+    try {
+        const { academic_year, semester } = getCurrentTerm();
+        let query = supabaseClient
+            .from("registrations")
+            .select(`*, clubs ( name, teacher, location )`)
+            .eq("academic_year", academic_year)
+            .eq("semester", semester);
+
+        if (info.student_id) {
+            query = query.eq("student_id", String(info.student_id));
+        } else {
+            query = query
+                .ilike("first_name", info.first_name || "")
+                .ilike("last_name", info.last_name || "");
+        }
+
+        const { data, error } = await query.order("created_at", { ascending: true });
+        if (error) throw error;
+
+        if (!data || data.length === 0) {
+            card.style.display = "none";
+            card.innerHTML = "";
+            return;
+        }
+
+        const itemsHtml = data.map(reg => {
+            const clubName = (reg.clubs && reg.clubs.name) ? reg.clubs.name : "ไม่ระบุชุมนุม";
+            const teacher = (reg.clubs && reg.clubs.teacher) ? reg.clubs.teacher : "";
+            const location = (reg.clubs && reg.clubs.location) ? reg.clubs.location : "";
+            const date = reg.created_at ? new Date(reg.created_at).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" }) : "";
+            const badge = reg.registration_status === "verified"
+                ? `<span class="ticket-status-badge verified" style="font-size:0.7rem; padding:2px 8px;">ยืนยันแล้ว</span>`
+                : `<span class="ticket-status-badge pending" style="font-size:0.7rem; padding:2px 8px;">สำรองสิทธิ์</span>`;
+            const meta = [teacher && `<i class="fa-solid fa-user-tie"></i> ${teacher}`, location && `<i class="fa-solid fa-location-dot"></i> ${location}`].filter(Boolean).join(" &nbsp;·&nbsp; ");
+            return `
+                <div style="background: rgba(7,23,15,0.5); border:1px solid rgba(52,211,153,0.25); border-radius: 10px; padding: 10px 12px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:4px;">
+                        <span style="font-size: 0.95rem; font-weight: 700; color: var(--accent-mint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${clubName}">${clubName}</span>
+                        ${badge}
+                    </div>
+                    ${meta ? `<div style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 2px;">${meta}</div>` : ""}
+                    ${date ? `<div style="font-size: 0.7rem; color: var(--text-muted);">ลงทะเบียนเมื่อ ${date} น.</div>` : ""}
+                </div>
+            `;
+        }).join("");
+
+        card.innerHTML = `
+            <div class="identity-card" style="padding: 14px;">
+                <div class="identity-card-header" style="color: var(--accent-mint); margin-bottom: 8px;">
+                    <i class="fa-solid fa-circle-check"></i>
+                    <span>ผลการลงทะเบียนของฉัน · ภาคเรียนที่ ${semester}/${academic_year}</span>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:8px;">${itemsHtml}</div>
+            </div>
+        `;
+        card.style.display = "block";
+    } catch (e) {
+        console.warn("Failed to load my registrations:", e);
+        card.style.display = "none";
+        card.innerHTML = "";
+    }
+}
+window.renderMyRegistrations = renderMyRegistrations;
 
 // =====================================================================
 // 📝 5. STUDENT REGISTRATION FLOW (ATOMIC & CONCURRENCY SAFE)
@@ -862,6 +945,7 @@ async function verifyStudentID() {
             
             // อัปเดตส่วนคัดกรองหน้าแรกด้วย
             updateQuickVerifyUI();
+            renderMyRegistrations();
         } else {
             // 🔵 เคสที่ 2: ไม่พบรายชื่อ (นักเรียนใหม่ / ย้ายคลาส) -> เปิดให้กรอกเอง
             state.currentStudentInfo = null;
@@ -1003,6 +1087,7 @@ async function submitStudentRegistration() {
 
                 // รีเฟรชข้อมูลในหน้าเว็บบอร์ดหลังบ้าน
                 loadClubsData();
+                renderMyRegistrations();
             } else {
                 // ได้รับข้อความปฏิเสธจาก Stored procedure (เช่น สมัครซ้ำ หรือ ที่นั่งเต็ม)
                 showToast(data.message || "เกิดข้อผิดพลาดในการรับสมัคร", "error");
