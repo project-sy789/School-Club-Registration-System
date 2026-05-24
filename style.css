@@ -972,6 +972,7 @@ input[type="checkbox"]:checked + .toggle-switch::after {
     word-break: break-word;
     line-height: 1.4;
     min-width: 0;
+    width: 100%;
 }
 
 .modal-club-details div:last-child span i {
