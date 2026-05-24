@@ -949,10 +949,10 @@ input[type="checkbox"]:checked + .toggle-switch::after {
     opacity: 0.8;
 }
 
-/* Single-frame layout for teacher and location */
 .modal-club-details div:last-child {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
+    flex-wrap: wrap;
     gap: 8px;
     font-size: 0.85rem !important;
     color: var(--text-secondary) !important;
