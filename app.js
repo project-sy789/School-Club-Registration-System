@@ -896,6 +896,11 @@ function openRegistrationModal(clubId) {
 function closeRegistrationModal() {
     document.getElementById("registration-modal").classList.remove("active");
     state.currentClub = null;
+    const submitBtn = document.getElementById("submit-registration-btn");
+    if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = `<i class="fa-solid fa-signature"></i> ยืนยันสมัครเข้าชุมนุมนี้`;
+    }
 }
 
 // 🔒 ปิดโมดอล เลื่อนและไฮไลท์แผงตรวจสอบตัวตนหน้าแรก
