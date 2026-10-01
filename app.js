@@ -4,6 +4,21 @@
 
 let supabaseClient = null;
 let activeToastTimeout = null; // บันทึกไอดีสำหรับเคลียร์เวลาแสดง Toast ป้องกันการแสดงทับแล้วดับเร็ว
+const REGISTRATION_TOKENS_KEY = "school-club-registration-tokens";
+
+function isPendingReference(value) {
+    return /^0\d{9}$/.test(value) || /^TMP-[A-Z0-9]{6,32}$/i.test(value);
+}
+
+function getRegistrationRequestKey(identity) {
+    const keyName = `school-club-request:${identity}`;
+    let requestKey = sessionStorage.getItem(keyName);
+    if (!requestKey) {
+        requestKey = crypto.randomUUID();
+        sessionStorage.setItem(keyName, requestKey);
+    }
+    return { keyName, requestKey };
+}
 
 // 📊 Application State
 let state = {
@@ -12,7 +27,7 @@ let state = {
     registrations: [],
     auditLogs: [], // เก็บประวัติความปลอดภัยระบบ
     settings: {
-        school_config: { school_name: "ระบบลงทะเบียนชุมนุม", semester: "1", academic_year: "2569", admin_password: "admin-password-1234" },
+        school_config: { school_name: "ระบบลงทะเบียนชุมนุม", semester: "1", academic_year: "2569" },
         registration_period: { is_active: true, start_time: "", end_time: "" }
     },
     currentClub: null,
@@ -110,6 +125,22 @@ async function getUserIpAddress() {
 // =====================================================================
 // 🔑 1. SUPABASE CLIENT SET-UP & INITIALIZATION
 // =====================================================================
+async function syncAdminSession(session) {
+    if (!session || !supabaseClient) {
+        state.isAdminLoggedIn = false;
+        return false;
+    }
+
+    const { data, error } = await supabaseClient.rpc("is_admin");
+    if (error || data !== true) {
+        state.isAdminLoggedIn = false;
+        return false;
+    }
+
+    state.isAdminLoggedIn = true;
+    return true;
+}
+
 function initSupabaseConnection() {
     // ดึงค่าการเชื่อมต่อจากไฟล์ config.js เท่านั้น (หรือฝังผ่าน GitHub Secrets/Actions)
     if (typeof SUPABASE_CONFIG === 'undefined' || !SUPABASE_CONFIG.SUPABASE_URL || !SUPABASE_CONFIG.SUPABASE_ANON_KEY) {
@@ -120,8 +151,15 @@ function initSupabaseConnection() {
     try {
         supabaseClient = supabase.createClient(SUPABASE_CONFIG.SUPABASE_URL, SUPABASE_CONFIG.SUPABASE_ANON_KEY);
 
+        supabaseClient.auth.onAuthStateChange((_event, session) => {
+            syncAdminSession(session).catch(error => console.error("Admin session check failed:", error));
+        });
+
         // โหลดข้อมูลตั้งค่าระบบก่อน แล้วค่อยโหลดรายชื่อชุมนุม
-        loadSystemSettings().then(() => {
+        Promise.all([
+            loadSystemSettings(),
+            supabaseClient.auth.getSession().then(({ data }) => syncAdminSession(data.session))
+        ]).then(() => {
             loadClubsData();
             startCountdownTimer();
             populateRegistrationLevelDropdown();
@@ -158,12 +196,12 @@ function showFatalConfigError() {
 async function loadSystemSettings() {
     if (!supabaseClient) return;
     try {
-        const { data, error } = await supabaseClient.from("settings").select("*");
+        const { data, error } = await supabaseClient.rpc("get_public_settings");
         if (error) throw error;
 
-        if (data && data.length > 0) {
-            data.forEach(item => {
-                state.settings[item.key] = item.value;
+        if (data && typeof data === "object") {
+            Object.entries(data).forEach(([key, value]) => {
+                state.settings[key] = value;
             });
         }
 
@@ -510,16 +548,13 @@ async function quickVerifyStudent() {
     }
 
     try {
-        const { data, error } = await supabaseClient
-            .from("students")
-            .select("*")
-            .eq("student_id", idInput)
-            .eq("status", "active")
-            .maybeSingle();
+        const { data, error } = await supabaseClient.rpc("lookup_student_for_registration", {
+            p_student_id: idInput
+        });
 
         if (error) throw error;
 
-        if (data) {
+        if (data && data.found) {
             state.currentStudentInfo = data;
             
             // 1. ดึงระดับชั้นมา เช่น "ม.4" จาก "ม.4/1"
@@ -566,12 +601,13 @@ function updateQuickVerifyUI() {
 
     if (state.currentStudentInfo) {
         const data = state.currentStudentInfo;
+        const isPendingReference = Boolean(data.is_pending_reference);
         const displayName = `${data.prefix || ""}${data.first_name} ${data.last_name}`;
         
         wrapper.innerHTML = `
-            <div class="identity-card-header" style="color: var(--accent-mint);">
-                <i class="fa-solid fa-circle-check"></i>
-                <span>ยืนยันตัวตนสำเร็จ</span>
+            <div class="identity-card-header" style="color: ${isPendingReference ? "#7dd3fc" : "var(--accent-mint)"};">
+                <i class="fa-solid ${isPendingReference ? "fa-clock" : "fa-circle-check"}"></i>
+                <span>${isPendingReference ? "ข้อมูลนักเรียนใหม่ รอตรวจสอบ" : "ยืนยันตัวตนสำเร็จ"}</span>
             </div>
             <div style="background: rgba(52, 211, 153, 0.08); border: 1px solid rgba(52, 211, 153, 0.3); border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px;">
                 <div style="display: flex; flex-direction: column; overflow: hidden; flex: 1; text-align: left;">
@@ -591,7 +627,7 @@ function updateQuickVerifyUI() {
             </div>
             <div style="display: flex; flex-direction: column; gap: 8px;">
                 <div style="display: flex; gap: 6px;">
-                    <input type="text" id="quick-new-id" placeholder="เบอร์โทร 10 หลัก หรือ เลขบัตร 13 หลัก" style="background: rgba(7,23,15,0.6); border: var(--border-glass); color: white; padding: 8px 10px; border-radius: 8px; font-size: 0.85rem; flex: 1;">
+                    <input type="text" id="quick-new-id" placeholder="เบอร์ผู้ปกครอง 10 หลัก หรือ TMP-XXXXXX" autocomplete="off" style="background: rgba(7,23,15,0.6); border: var(--border-glass); color: white; padding: 8px 10px; border-radius: 8px; font-size: 0.85rem; flex: 1;">
                     <select id="quick-prefix" style="background: rgba(7,23,15,0.6); border: var(--border-glass); color: white; padding: 8px; border-radius: 8px; font-size: 0.85rem; width: 38%;">
                         <option value="">คำนำหน้า</option>
                         <option value="เด็กชาย">เด็กชาย</option>
@@ -672,7 +708,11 @@ function saveQuickNewStudent() {
     const lastName = document.getElementById("quick-lastname").value.trim();
 
     if (!newId || !prefix || !level || !firstName || !lastName) {
-        showToast("กรุณากรอกข้อมูลให้ครบ: รหัสอ้างอิง, คำนำหน้า, ชื่อ, นามสกุล และระดับชั้น", "warning");
+        showToast("กรุณากรอกข้อมูลให้ครบ: เบอร์ผู้ปกครองหรือรหัส TMP, คำนำหน้า, ชื่อ, นามสกุล และระดับชั้น", "warning");
+        return;
+    }
+    if (!isPendingReference(newId)) {
+        showToast("ข้อมูลอ้างอิงนักเรียนใหม่ต้องเป็นเบอร์ 10 หลักที่ขึ้นต้นด้วย 0 หรือรหัสรูปแบบ TMP-XXXXXX", "warning");
         return;
     }
 
@@ -681,7 +721,8 @@ function saveQuickNewStudent() {
         prefix: prefix,
         first_name: firstName,
         last_name: lastName,
-        level: level
+        level: level,
+        is_pending_reference: true
     };
     state.isNewStudentPreRegistering = false;
 
@@ -731,7 +772,14 @@ window.updateQuickVerifyUI = updateQuickVerifyUI;
 async function renderMyRegistrations() {
     const card = document.getElementById("my-registrations-card");
     const info = state.currentStudentInfo;
-    if (!info) {
+    let savedTokens = [];
+    try {
+        savedTokens = JSON.parse(localStorage.getItem(REGISTRATION_TOKENS_KEY) || "[]");
+    } catch (_error) {
+        savedTokens = [];
+    }
+
+    if (!info && savedTokens.length === 0) {
         state.myRegistrations = [];
         if (card) {
             card.style.display = "none";
@@ -747,23 +795,19 @@ async function renderMyRegistrations() {
     }
 
     try {
-        const { academic_year, semester } = getCurrentTerm();
-        let query = supabaseClient
-            .from("registrations")
-            .select(`*, clubs ( name, teacher, location )`)
-            .eq("academic_year", academic_year)
-            .eq("semester", semester);
-
-        if (info.student_id) {
-            query = query.eq("student_id", String(info.student_id));
-        } else {
-            query = query
-                .ilike("first_name", info.first_name || "")
-                .ilike("last_name", info.last_name || "");
-        }
-
-        const { data, error } = await query.order("created_at", { ascending: true });
+        const { data: rows, error } = await supabaseClient.rpc("get_my_registrations", {
+            p_registration_tokens: savedTokens
+        });
         if (error) throw error;
+
+        const data = (rows || []).map(reg => ({
+            ...reg,
+            clubs: {
+                name: reg.club_name,
+                teacher: reg.teacher,
+                location: reg.location
+            }
+        }));
 
         state.myRegistrations = data || [];
 
@@ -852,6 +896,7 @@ function openRegistrationModal(clubId) {
     // ดึงค่าสิทธิ์หากเคยระบุและยืนยันตัวตนไว้ที่หน้าแรกแล้ว
     if (state.currentStudentInfo) {
         const data = state.currentStudentInfo;
+        const isPendingReference = Boolean(data.is_pending_reference);
         document.getElementById("student-id-input").value = data.student_id;
         document.getElementById("prefix-input").value = data.prefix || "";
         document.getElementById("first-name-input").value = data.first_name;
@@ -860,13 +905,13 @@ function openRegistrationModal(clubId) {
         
         const alertBox = document.getElementById("verify-alert-box");
         alertBox.style.display = "flex";
-        alertBox.className = "verification-alert verified";
+        alertBox.className = `verification-alert ${isPendingReference ? "pending" : "verified"}`;
         const displayName = (data.prefix || "") + data.first_name + " " + data.last_name;
         alertBox.innerHTML = `
-            <i class="fa-solid fa-circle-check"></i> 
+            <i class="fa-solid ${isPendingReference ? "fa-clock" : "fa-circle-check"}"></i>
             <div>
-                <strong>ยืนยันตัวตนสำเร็จ:</strong> ${displayName} (${data.level})<br>
-                <span style="font-size:0.8rem; opacity:0.85;">ดึงข้อมูลการยืนยันตัวตนจากหน้าแรกอัตโนมัติ กดลงทะเบียนได้ทันที</span>
+                <strong>${isPendingReference ? "ข้อมูลนักเรียนใหม่:" : "ยืนยันตัวตนสำเร็จ:"}</strong> ${displayName} (${data.level})<br>
+                <span style="font-size:0.8rem; opacity:0.85;">${isPendingReference ? "รายการจะรอผู้ดูแลตรวจสอบหลังจองที่นั่ง" : "ดึงข้อมูลจากทะเบียนโรงเรียน กดลงทะเบียนได้ทันที"}</span>
             </div>
         `;
 
@@ -874,6 +919,11 @@ function openRegistrationModal(clubId) {
         document.getElementById("modal-verified-name").innerText = displayName;
         document.getElementById("modal-verified-id").innerText = data.student_id || "นักเรียนใหม่ (รอการจัดเลข)";
         document.getElementById("modal-verified-level").innerText = data.level;
+        const profileBadge = document.querySelector("#modal-verified-view .verified-card-badge");
+        if (profileBadge) {
+            profileBadge.classList.toggle("pending", isPendingReference);
+            profileBadge.innerHTML = `<i class="fa-solid ${isPendingReference ? "fa-clock" : "fa-circle-check"}"></i> ${isPendingReference ? "รอตรวจสอบรหัสนักเรียน" : "ยืนยันตัวตนสำเร็จ"}`;
+        }
 
         document.getElementById("modal-verified-view").style.display = "flex";
         document.getElementById("modal-unverified-view").style.display = "none";
@@ -945,16 +995,13 @@ async function verifyStudentID() {
     manualArea.classList.remove("active");
 
     try {
-        const { data, error } = await supabaseClient
-            .from("students")
-            .select("*")
-            .eq("student_id", idInput)
-            .eq("status", "active")
-            .maybeSingle();
+        const { data, error } = await supabaseClient.rpc("lookup_student_for_registration", {
+            p_student_id: idInput
+        });
 
         if (error) throw error;
 
-        if (data) {
+        if (data && data.found) {
             // 🟢 เคสที่ 1: ตรวจพบรายชื่อในระบบ
             state.currentStudentInfo = data;
             
@@ -981,6 +1028,7 @@ async function verifyStudentID() {
             // อัปเดตส่วนคัดกรองหน้าแรกด้วย
             updateQuickVerifyUI();
             renderMyRegistrations();
+            document.getElementById("submit-registration-btn").style.display = "flex";
         } else {
             // 🔵 เคสที่ 2: ไม่พบรายชื่อ (นักเรียนใหม่ / ย้ายคลาส) -> เปิดให้กรอกเอง
             state.currentStudentInfo = null;
@@ -991,7 +1039,7 @@ async function verifyStudentID() {
                 <i class="fa-solid fa-triangle-exclamation"></i> 
                 <div>
                     <strong>ไม่พบเลขประจำตัวในระบบชั่วคราว:</strong> นักเรียนใหม่อาจจะยังไม่มีชื่อในฐานข้อมูลเดิม<br>
-                    <span style="font-weight:600;">โปรดกรอก คำนำหน้า ชื่อ-นามสกุล และเลือกห้องเรียนจริงที่แบบฟอร์มด้านล่างเพื่อจองสิทธิ์เข้าชุมนุมนี้ทันที!</span>
+            <span style="font-weight:600;">โปรดกรอก คำนำหน้า ชื่อ-นามสกุล และเลือกห้องเรียนจริง พร้อมเบอร์ผู้ปกครอง 10 หลักหรือรหัส TMP-XXXXXX เพื่อจองสิทธิ์ทันที</span>
                 </div>
             `;
             
@@ -1003,6 +1051,7 @@ async function verifyStudentID() {
             
             // เปิดสวิตช์ฟิลด์กรอกข้อมูล
             manualArea.classList.add("active");
+            document.getElementById("submit-registration-btn").style.display = "flex";
         }
     } catch (e) {
         console.error("Error verifying ID:", e);
@@ -1024,7 +1073,7 @@ function enableNewStudentManualEntry() {
         <i class="fa-solid fa-user-plus"></i> 
         <div>
             <strong>โหมดลงทะเบียนนักเรียนใหม่ (ไม่มีเลขประจำตัว):</strong><br>
-            <span style="font-size:0.85rem; opacity:0.95;">กรุณากรอก คำนำหน้า ชื่อจริง นามสกุล และระดับชั้นจริงที่แบบฟอร์มด้านล่างเพื่อสำรองสิทธิ์เข้าชุมนุมนี้ทันที!</span>
+            <span style="font-size:0.85rem; opacity:0.95;">กรุณากรอก คำนำหน้า ชื่อจริง นามสกุล ระดับชั้น และเบอร์ผู้ปกครอง 10 หลักหรือรหัส TMP-XXXXXX เพื่อสำรองสิทธิ์ทันที</span>
         </div>
     `;
     
@@ -1036,6 +1085,7 @@ function enableNewStudentManualEntry() {
     
     // เปิดสวิตช์ฟิลด์กรอกข้อมูล
     document.getElementById("manual-entry-form").classList.add("active");
+    document.getElementById("submit-registration-btn").style.display = "flex";
 }
 
 // ⚡ บันทึกการลงทะเบียนอย่างปลอดภัยแบบรองรับ Concurrent 800 คน
@@ -1052,10 +1102,20 @@ async function submitStudentRegistration() {
     }
 
     const submitBtn = document.getElementById("submit-registration-btn");
+    const identityKey = `${state.currentClub.id}:${studentId || `${prefix}:${firstName}:${lastName}:${level}`.toLocaleLowerCase()}`;
+    const { keyName: requestKeyName, requestKey } = getRegistrationRequestKey(identityKey);
 
     // 1. ตรวจสอบความครบถ้วนของข้อมูล
     if (!prefix || !firstName || !lastName || !level) {
         showToast("กรุณากรอกข้อมูลนักเรียน คำนำหน้าชื่อ ชื่อจริง นามสกุล และห้องเรียนให้ครบถ้วน", "warning");
+        return;
+    }
+    if (!studentId) {
+        showToast("นักเรียนใหม่ต้องกรอกเบอร์ผู้ปกครอง 10 หลักหรือรหัส TMP-XXXXXX", "warning");
+        return;
+    }
+    if ((!state.currentStudentInfo || state.currentStudentInfo.is_pending_reference) && !isPendingReference(studentId)) {
+        showToast("ข้อมูลอ้างอิงนักเรียนใหม่ต้องเป็นเบอร์ 10 หลักที่ขึ้นต้นด้วย 0 หรือรหัสรูปแบบ TMP-XXXXXX", "warning");
         return;
     }
 
@@ -1066,17 +1126,14 @@ async function submitStudentRegistration() {
         return;
     }
 
-    // 3. ป้องกันการลงสแปมด้วยระบบ Jitter (หน่วงเวลาสุ่ม) เพื่อกระจาย Request หลบ Peak concurrent 
+    // Database row locks and unique constraints arbitrate concurrent requests.
     submitBtn.disabled = true;
     submitBtn.innerHTML = `<div class="spinner"></div> กำลังประมวลผลข้อมูลและจองสิทธิ์...`;
 
-    // สุ่มเวลาหน่วง (Jitter) ระหว่าง 400ms - 1500ms
-    const jitterDelay = Math.floor(Math.random() * 1100) + 400;
-    
-    setTimeout(async () => {
-        try {
-            // ดึง IP Address และอุปกรณ์ของนักเรียน ณ วินาทีสมัคร
-            const ipAddress = await getUserIpAddress();
+    try {
+            // Do not call a third-party IP service for every registration.
+            // The extra network hop would amplify a 1,000-user peak.
+            const ipAddress = null;
             const userAgent = navigator.userAgent || "Unknown Device";
 
             // 4. สั่งเรียก RPC Function register_student_atomic บนฐานข้อมูล Supabase เพื่อตัดที่นั่งแบบปลอดภัย (Row level lock)
@@ -1088,12 +1145,24 @@ async function submitStudentRegistration() {
                 p_last_name: lastName,
                 p_level: level,
                 p_ip_address: ipAddress,
-                p_user_agent: userAgent
+                p_user_agent: userAgent,
+                p_request_key: requestKey
             });
 
             if (error) throw error;
 
             if (data && data.success) {
+                sessionStorage.removeItem(requestKeyName);
+                try {
+                    const tokens = JSON.parse(localStorage.getItem(REGISTRATION_TOKENS_KEY) || "[]");
+                    if (data.registration_token && !tokens.includes(data.registration_token)) {
+                        tokens.push(data.registration_token);
+                        localStorage.setItem(REGISTRATION_TOKENS_KEY, JSON.stringify(tokens.slice(-10)));
+                    }
+                } catch (_storageError) {
+                    console.warn("Could not store registration access token in this browser.");
+                }
+
                 // 🎉 ลงทะเบียนเสร็จสิ้น
                 showToast(data.message, "success");
                 
@@ -1104,7 +1173,10 @@ async function submitStudentRegistration() {
                 document.getElementById("ticket-club-name").innerText = state.currentClub.name;
                 document.getElementById("ticket-student-name").innerText = `${prefix}${firstName} ${lastName}`;
                 document.getElementById("ticket-student-level").innerText = level;
-                document.getElementById("ticket-student-id").innerText = studentId || "นักเรียนใหม่ (รอการจัดเลข)";
+                const ticketReference = data.status === "pending" && /^0\d{9}$/.test(studentId)
+                    ? `เบอร์อ้างอิงท้าย ${studentId.slice(-4)}`
+                    : (studentId || "นักเรียนใหม่ (รอการจัดเลข)");
+                document.getElementById("ticket-student-id").innerText = ticketReference;
                 document.getElementById("ticket-location-teacher").innerHTML = `<i class="fa-solid fa-location-dot"></i> ${state.currentClub.location} &nbsp;&nbsp;&nbsp; <i class="fa-solid fa-user-tie"></i> ${state.currentClub.teacher}`;
 
                 const badge = document.getElementById("ticket-status-badge");
@@ -1129,13 +1201,12 @@ async function submitStudentRegistration() {
                 submitBtn.disabled = false;
                 submitBtn.innerHTML = `<i class="fa-solid fa-signature"></i> ยืนยันสมัครเข้าชุมนุมนี้`;
             }
-        } catch (e) {
+    } catch (e) {
             console.error("Error submitting registration:", e);
             showToast("ไม่สามารถประมวลผลคำขอของคุณได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง", "error");
             submitBtn.disabled = false;
             submitBtn.innerHTML = `<i class="fa-solid fa-signature"></i> ยืนยันสมัครเข้าชุมนุมนี้`;
-        }
-    }, jitterDelay);
+    }
 }
 
 function triggerConfettiCelebration() {
@@ -1157,7 +1228,14 @@ function handleVerifyIdKeyPress(event) {
 // =====================================================================
 // 📝 6. REGISTRATIONS SEARCH TAB (FRONTEND)
 // =====================================================================
+function requireAdminForRegistrationSearch() {
+    if (state.isAdminLoggedIn) return true;
+    showToast("รายชื่อผู้สมัครเป็นข้อมูลส่วนบุคคล กรุณาเข้าสู่ระบบผู้ดูแลก่อนค้นหา", "warning");
+    return false;
+}
+
 async function searchStudentRegistrations() {
+    if (!requireAdminForRegistrationSearch()) return;
     const term = document.getElementById("reg-search-input").value.trim();
     const resultsContainer = document.getElementById("reg-search-results-container");
     const resultsBody = document.getElementById("reg-search-results-body");
@@ -1282,6 +1360,7 @@ async function populateSearchClubDropdown() {
 async function populateTermFilterDropdown() {
     const select = document.getElementById("reg-term-filter");
     if (!select) return;
+    if (!state.isAdminLoggedIn) return;
 
     const previousValue = select.value || "__current__";
     const { academic_year: curYear, semester: curSem } = getCurrentTerm();
@@ -1336,6 +1415,7 @@ async function populateTermFilterDropdown() {
 
 // 🏫 จัดการเมื่อมีการเลือกชุมนุมใน dropdown ค้นหา
 async function handleClubSelectChange(event) {
+    if (!requireAdminForRegistrationSearch()) return;
     const clubId = event.target.value;
     const searchInput = document.getElementById("reg-search-input");
     const resultsContainer = document.getElementById("reg-search-results-container");
@@ -1414,20 +1494,25 @@ async function handleClubSelectChange(event) {
 // =====================================================================
 // ⚙️ 7. ADMIN DASHBOARD & CONTROL SYSTEM
 // =====================================================================
-function attemptAdminLogin() {
+async function attemptAdminLogin() {
     const entered = document.getElementById("admin-passcode-input").value;
-    const config = state.settings.school_config || {};
-    
-    if (entered === (config.admin_password || "admin-password-1234")) {
-        state.isAdminLoggedIn = true;
-        document.getElementById("admin-login-area").style.display = "none";
-        document.getElementById("admin-dashboard-area").style.display = "grid";
-        
-        loadAdminDashboardData();
-        showToast("ยินดีต้อนรับผู้บริหารระดับโรงเรียน เข้าสู่ระบบควบคุมสำเร็จรูป", "success");
-    } else {
-        showToast("รหัสผ่านควบคุมไม่ถูกต้อง กรุณาตรวจสอบรหัสผ่านอีกครั้ง", "error");
+    const email = document.getElementById("admin-email-input").value.trim();
+    if (!email || !entered) {
+        showToast("กรุณากรอกอีเมลและรหัสผ่าน", "warning");
+        return;
     }
+
+    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password: entered });
+    if (error || !data?.session || !(await syncAdminSession(data.session))) {
+        await supabaseClient.auth.signOut();
+        showToast("รหัสผ่านควบคุมไม่ถูกต้อง กรุณาตรวจสอบรหัสผ่านอีกครั้ง", "error");
+        return;
+    }
+
+    document.getElementById("admin-login-area").style.display = "none";
+    document.getElementById("admin-dashboard-area").style.display = "grid";
+    loadAdminDashboardData();
+    showToast("เข้าสู่ระบบผู้ดูแลสำเร็จ", "success");
 }
 
 function handleAdminLoginKeyPress(event) {
@@ -1437,11 +1522,13 @@ function handleAdminLoginKeyPress(event) {
 }
 
 function adminLogout() {
-    state.isAdminLoggedIn = false;
-    document.getElementById("admin-passcode-input").value = "";
-    document.getElementById("admin-dashboard-area").style.display = "none";
-    document.getElementById("admin-login-area").style.display = "block";
-    showToast("ออกจากระบบหลังบ้านเรียบร้อยแล้ว", "info");
+    supabaseClient.auth.signOut().finally(() => {
+        state.isAdminLoggedIn = false;
+        document.getElementById("admin-passcode-input").value = "";
+        document.getElementById("admin-dashboard-area").style.display = "none";
+        document.getElementById("admin-login-area").style.display = "block";
+        showToast("ออกจากระบบหลังบ้านเรียบร้อยแล้ว", "info");
+    });
 }
 
 function switchAdminSubTab(subTabId) {
@@ -1590,7 +1677,7 @@ function renderAdminPendingStudents() {
             <td>${reg.level}</td>
             <td style="color:var(--accent-mint); font-weight:600;">${clubName}</td>
             <td>
-                <input type="text" value="${reg.student_id || ''}" placeholder="กรอกเลขนักเรียน 5 หลัก..." 
+                <input type="text" value="${reg.student_id || ''}" placeholder="กรอกรหัสนักเรียนจริง..."
                        id="pending-id-input-${reg.id}" 
                        style="background:rgba(7,23,15,0.7); border:var(--border-glass); color:var(--text-primary); padding:6px 10px; border-radius:4px; font-size:0.85rem; width:140px;">
             </td>
@@ -1619,33 +1706,16 @@ async function approvePendingRegistration(regId) {
     }
 
     try {
-        const reg = state.registrations.find(r => r.id === regId);
-        const studentName = reg ? `${reg.first_name} ${reg.last_name}` : "ไม่ทราบชื่อ";
-        const clubName = reg && reg.clubs ? reg.clubs.name : "ไม่ทราบชุมนุม";
-        const oldStudentId = reg ? reg.student_id : null;
-
-        const { data, error } = await supabaseClient
-            .from("registrations")
-            .update({
-                student_id: stdIdVal,
-                registration_status: "verified"
-            })
-            .eq("id", regId)
-            .select();
+        const ipAddress = await getUserIpAddress();
+        const { data, error } = await supabaseClient.rpc("admin_approve_registration", {
+            p_registration_id: regId,
+            p_student_id: stdIdVal,
+            p_ip_address: ipAddress,
+            p_user_agent: navigator.userAgent || "Unknown Device"
+        });
 
         if (error) throw error;
-
-        // บันทึกประวัติความปลอดภัย (Audit Log)
-        const ipAddress = await getUserIpAddress();
-        await supabaseClient.from("audit_logs").insert({
-            student_id: stdIdVal,
-            student_name: studentName,
-            action: "PENDING_APPROVED",
-            club_name: clubName,
-            ip_address: ipAddress,
-            user_agent: navigator.userAgent || "Unknown Device",
-            details: `ผู้ดูแลระบบอนุมัติยืนยันสิทธิ์ของเด็กใหม่ (เลขประจำตัวเดิม: ${oldStudentId || 'ไม่มี'} -> ใหม่: ${stdIdVal})`
-        });
+        if (!data?.success) throw new Error(data?.message || "ไม่สามารถอนุมัติรายการได้");
 
         showToast("ยืนยันคุณสมบัติการเลือกเรียนชุมนุมของนักเรียนสำเร็จแล้ว", "success");
         loadAdminDashboardData();
@@ -1661,48 +1731,14 @@ async function cancelPendingRegistration(regId, clubId) {
     if (!confirm("คุณแน่ใจใช่หรือไม่ว่าต้องการยกเลิกและทำลายคำร้องจองสิทธิ์ของนักเรียนคนนี้? (ระบบจะคืนที่นั่งกลับชุมนุมทันที)")) return;
 
     try {
-        const reg = state.registrations.find(r => r.id === regId);
-        const studentName = reg ? `${reg.first_name} ${reg.last_name}` : "ไม่ทราบชื่อ";
-        const clubName = reg && reg.clubs ? reg.clubs.name : "ไม่ทราบชุมนุม";
-        const studentId = reg ? reg.student_id : null;
-        const status = reg ? reg.registration_status : "pending";
-
-        // 1. ลบประวัติการสมัครในทะเบียน
-        const { error: errDel } = await supabaseClient
-            .from("registrations")
-            .delete()
-            .eq("id", regId);
-
-        if (errDel) throw errDel;
-
-        // 2. คืนที่นั่ง (หักยอด enrolled_count ออก 1)
-        const { error: errUp } = await supabaseClient
-            .rpc("decrement_club_seats", { p_club_id: clubId });
-            
-        // กรณีไม่มี RPC เฉพาะกิจ สามารถรัน update ตรงๆ แบบ concurrency อิสระได้
-        if (errUp) {
-            // fallback หากยังไม่ได้รันตัว decrement
-            const targetClub = state.clubs.find(c => c.id === clubId);
-            if (targetClub) {
-                const newEnrolled = Math.max(0, targetClub.enrolled_count - 1);
-                await supabaseClient
-                    .from("clubs")
-                    .update({ enrolled_count: newEnrolled })
-                    .eq("id", clubId);
-            }
-        }
-
-        // บันทึกประวัติความปลอดภัย (Audit Log)
         const ipAddress = await getUserIpAddress();
-        await supabaseClient.from("audit_logs").insert({
-            student_id: studentId,
-            student_name: studentName,
-            action: status === "verified" ? "REGISTRATION_DELETED" : "PENDING_REJECTED",
-            club_name: clubName,
-            ip_address: ipAddress,
-            user_agent: navigator.userAgent || "Unknown Device",
-            details: `ผู้ดูแลระบบทำการยกเลิกสิทธิ์และลบรายชื่อนักเรียนออกจากชุมนุม (สถานะเดิม: ${status})`
+        const { data, error } = await supabaseClient.rpc("admin_delete_registration", {
+            p_registration_id: regId,
+            p_ip_address: ipAddress,
+            p_user_agent: navigator.userAgent || "Unknown Device"
         });
+        if (error) throw error;
+        if (!data?.success) throw new Error(data?.message || "ไม่สามารถยกเลิกรายการได้");
 
         showToast("ยกเลิกและคืนโควตาชุมนุมเสร็จสิ้นแล้ว", "info");
         
@@ -2742,7 +2778,7 @@ async function handleRegistrationsCSVImport(event) {
             const ipAddress = await getUserIpAddress();
             const userAgent = navigator.userAgent || "Unknown Device";
 
-            const { data, error } = await supabaseClient.rpc("bulk_register_atomic", {
+            const { data, error } = await supabaseClient.rpc("admin_bulk_register_atomic", {
                 p_rows: batch,
                 p_ip_address: ipAddress,
                 p_user_agent: userAgent
@@ -2971,7 +3007,6 @@ function renderAdminSettings() {
     document.getElementById("admin-settings-school-name").value = config.school_name || "";
     document.getElementById("admin-settings-academic-year").value = config.academic_year || "";
     document.getElementById("admin-settings-semester").value = config.semester || "";
-    document.getElementById("admin-settings-admin-password").value = config.admin_password || "";
 
     // 🖼️ แสดงพรีวิวรูปภาพโลโก้เดิม
     const previewBox = document.getElementById("settings-logo-preview");
@@ -3017,14 +3052,13 @@ async function saveSystemSettings() {
     const schoolName = document.getElementById("admin-settings-school-name").value.trim();
     const academicYear = document.getElementById("admin-settings-academic-year").value.trim();
     const semester = document.getElementById("admin-settings-semester").value.trim();
-    const adminPassword = document.getElementById("admin-settings-admin-password").value.trim();
 
     const is_active = document.getElementById("admin-settings-is-active").checked;
     const start_time = document.getElementById("admin-settings-start-time").value;
     const end_time = document.getElementById("admin-settings-end-time").value;
 
-    if (!schoolName || !academicYear || !semester || !adminPassword) {
-        showToast("กรุณากรอกข้อมูลตั้งค่าหลักให้ครบถ้วน (ชื่อ, ปีการศึกษา, ภาคเรียน, รหัสผ่านใหม่)", "warning");
+    if (!schoolName || !academicYear || !semester) {
+        showToast("กรุณากรอกข้อมูลตั้งค่าหลักให้ครบถ้วน (ชื่อ, ปีการศึกษา, ภาคเรียน)", "warning");
         return;
     }
 
@@ -3032,7 +3066,6 @@ async function saveSystemSettings() {
         school_name: schoolName,
         academic_year: academicYear,
         semester,
-        admin_password: adminPassword,
         logo_base64: state.temp_logo_base64 || null
     };
 
@@ -3651,12 +3684,14 @@ async function saveAdminStudentRegistration() {
         }
 
         // หากเป็นการเพิ่มใหม่ และชุมนุมเต็มแล้ว ให้แอดมินยืนยันอีกรอบ
+        let allowOverCapacity = false;
         if (!isEditMode) {
             const currentTotalCount = state.registrations.filter(r => r.club_id === currentManagingClubId).length;
             if (currentTotalCount >= club.capacity) {
                 if (!confirm(`⚠️ ขณะนี้ชุมนุมนี้เต็มแล้ว (${currentTotalCount}/${club.capacity} คน) คุณแน่ใจใช่หรือไม่ว่าต้องการเพิ่มนักเรียนคนนี้เป็นกรณีพิเศษ (Over-capacity)?`)) {
                     return;
                 }
+                allowOverCapacity = true;
             }
         }
 
@@ -3665,70 +3700,38 @@ async function saveAdminStudentRegistration() {
         submitBtn.innerHTML = `<div class="spinner"></div> กำลังบันทึก...`;
 
         if (isEditMode) {
-            // โหมดแก้ไข
-            const { error: updateErr } = await supabaseClient
-                .from("registrations")
-                .update({
-                    student_id: studentId || null,
-                    prefix: prefix || null,
-                    first_name: firstName,
-                    last_name: lastName,
-                    level: level,
-                    registration_status: status
-                })
-                .eq("id", regId);
-
-            if (updateErr) throw updateErr;
-
-            // บันทึกประวัติ Audit Log
-            await supabaseClient.from("audit_logs").insert({
-                student_id: studentId || null,
-                student_name: `${prefix || ""}${firstName} ${lastName}`,
-                action: "SETTINGS_UPDATED",
-                club_name: club.name,
-                ip_address: ipAddress,
-                user_agent: userAgent,
-                details: `ผู้ดูแลระบบแก้ไขข้อมูลทะเบียนนักเรียนโดยตรง (รหัสนักเรียน: ${studentId || 'ไม่มี'}, ชั้น: ${level}, สถานะ: ${status})`
+            const { data: result, error } = await supabaseClient.rpc("admin_upsert_registration", {
+                p_registration_id: regId,
+                p_club_id: currentManagingClubId,
+                p_student_id: studentId || null,
+                p_prefix: prefix || null,
+                p_first_name: firstName,
+                p_last_name: lastName,
+                p_level: level,
+                p_registration_status: status,
+                p_allow_over_capacity: false,
+                p_ip_address: ipAddress,
+                p_user_agent: userAgent
             });
-
+            if (error) throw error;
+            if (!result?.success) throw new Error(result?.message || "ไม่สามารถแก้ไขรายการได้");
             showToast("แก้ไขข้อมูลนักเรียนในทะเบียนสำเร็จแล้ว", "success");
         } else {
-            // โหมดเพิ่มใหม่
-            const { academic_year, semester } = getCurrentTerm();
-            const { error: insertErr } = await supabaseClient
-                .from("registrations")
-                .insert([{
-                    club_id: currentManagingClubId,
-                    student_id: studentId || null,
-                    prefix: prefix || null,
-                    first_name: firstName,
-                    last_name: lastName,
-                    level: level,
-                    registration_status: status,
-                    academic_year,
-                    semester
-                }]);
-
-            if (insertErr) throw insertErr;
-
-            // ปรับปรุงยอดตัวเลขนับจำนวนผู้ลงสมัครในชุมนุม +1
-            const newEnrolled = club.enrolled_count + 1;
-            await supabaseClient
-                .from("clubs")
-                .update({ enrolled_count: newEnrolled })
-                .eq("id", currentManagingClubId);
-
-            // บันทึกประวัติ Audit Log
-            await supabaseClient.from("audit_logs").insert({
-                student_id: studentId || null,
-                student_name: `${prefix || ""}${firstName} ${lastName}`,
-                action: "REGISTER_SUCCESS",
-                club_name: club.name,
-                ip_address: ipAddress,
-                user_agent: userAgent,
-                details: `ผู้ดูแลระบบทำการเพิ่มและลงทะเบียนนักเรียนเข้าสู่ชุมนุมโดยตรง (รหัสนักเรียน: ${studentId || 'ไม่มี'}, ชั้น: ${level}, สถานะ: ${status})`
+            const { data: result, error } = await supabaseClient.rpc("admin_upsert_registration", {
+                p_registration_id: null,
+                p_club_id: currentManagingClubId,
+                p_student_id: studentId || null,
+                p_prefix: prefix || null,
+                p_first_name: firstName,
+                p_last_name: lastName,
+                p_level: level,
+                p_registration_status: status,
+                p_allow_over_capacity: allowOverCapacity,
+                p_ip_address: ipAddress,
+                p_user_agent: userAgent
             });
-
+            if (error) throw error;
+            if (!result?.success) throw new Error(result?.message || "ไม่สามารถเพิ่มรายการได้");
             showToast(`เพิ่มนักเรียนเข้าสู่ชุมนุม "${club.name}" เรียบร้อยแล้ว`, "success");
         }
 
@@ -3778,40 +3781,13 @@ async function deleteAdminStudent(regId, clubId) {
 
     try {
         const ipAddress = await getUserIpAddress();
-        const userAgent = navigator.userAgent || "Unknown Device";
-        const club = state.clubs.find(c => c.id === clubId);
-
-        // 1. ลบจากทะเบียน
-        const { error: delErr } = await supabaseClient
-            .from("registrations")
-            .delete()
-            .eq("id", regId);
-
-        if (delErr) throw delErr;
-
-        // 2. คืนที่นั่ง ( decrement_club_seats RPC หรือ อัปเดต enrolled_count Direct)
-        const { error: errUp } = await supabaseClient
-            .rpc("decrement_club_seats", { p_club_id: clubId });
-            
-        if (errUp && club) {
-            // fallback หาก RPC ไม่มีตัวตน
-            const newEnrolled = Math.max(0, club.enrolled_count - 1);
-            await supabaseClient
-                .from("clubs")
-                .update({ enrolled_count: newEnrolled })
-                .eq("id", clubId);
-        }
-
-        // 3. เขียนประวัติ Audit Log
-        await supabaseClient.from("audit_logs").insert({
-            student_id: reg.student_id || null,
-            student_name: fullName,
-            action: "REGISTRATION_DELETED",
-            club_name: club ? club.name : "ไม่ทราบชุมนุม",
-            ip_address: ipAddress,
-            user_agent: userAgent,
-            details: `ผู้ดูแลระบบลบชื่อนักเรียนออกจากบัญชีรายชื่อของชุมนุมโดยตรง`
+        const { data, error } = await supabaseClient.rpc("admin_delete_registration", {
+            p_registration_id: regId,
+            p_ip_address: ipAddress,
+            p_user_agent: navigator.userAgent || "Unknown Device"
         });
+        if (error) throw error;
+        if (!data?.success) throw new Error(data?.message || "ไม่สามารถลบรายการได้");
 
         showToast(`ลบสิทธิ์นักเรียน "${fullName}" และคืนที่นั่งเรียบร้อยแล้ว`, "info");
 
@@ -3861,7 +3837,7 @@ async function promoteAllStudents() {
 
     try {
         const ipAddress = await getUserIpAddress();
-        const { data, error } = await supabaseClient.rpc("promote_all_students", {
+        const { data, error } = await supabaseClient.rpc("admin_promote_all_students", {
             p_ip_address: ipAddress,
             p_user_agent: navigator.userAgent,
         });
@@ -3910,7 +3886,7 @@ async function startNewTerm() {
 
     try {
         const ipAddress = await getUserIpAddress();
-        const { data, error } = await supabaseClient.rpc("start_new_term", {
+        const { data, error } = await supabaseClient.rpc("admin_start_new_term", {
             p_academic_year: academicYear,
             p_semester: semester,
             p_ip_address: ipAddress,
@@ -3944,7 +3920,7 @@ window.startNewTerm = startNewTerm;
 // ────────────────────────────────────────────────────────────────────
 async function rollbackToTerm() {
     try {
-        const { data: listData, error: listErr } = await supabaseClient.rpc("list_archived_terms");
+        const { data: listData, error: listErr } = await supabaseClient.rpc("admin_list_archived_terms");
         if (listErr) throw listErr;
         if (!listData || listData.success === false) {
             throw new Error((listData && listData.message) || "โหลดรายการเทอมไม่สำเร็จ");
@@ -4042,7 +4018,7 @@ async function anonymizeGraduatedStudents() {
 
     try {
         const ipAddress = await getUserIpAddress();
-        const { data, error } = await supabaseClient.rpc("anonymize_graduated_students", {
+        const { data, error } = await supabaseClient.rpc("admin_anonymize_graduated_students", {
             p_years_old: yearsOld,
             p_ip_address: ipAddress,
             p_user_agent: navigator.userAgent,
@@ -4078,7 +4054,7 @@ async function deleteGraduatedStudent(studentPk, displayName) {
 
     try {
         const ipAddress = await getUserIpAddress();
-        const { data, error } = await supabaseClient.rpc("delete_graduated_student", {
+        const { data, error } = await supabaseClient.rpc("admin_delete_graduated_student", {
             p_student_pk: studentPk,
             p_ip_address: ipAddress,
             p_user_agent: navigator.userAgent,
@@ -4146,4 +4122,3 @@ async function loadGraduatedStudentsList() {
 window.anonymizeGraduatedStudents = anonymizeGraduatedStudents;
 window.deleteGraduatedStudent = deleteGraduatedStudent;
 window.loadGraduatedStudentsList = loadGraduatedStudentsList;
-

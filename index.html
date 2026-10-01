@@ -211,11 +211,13 @@
                     <i class="fa-solid fa-lock"></i>
                 </div>
                 <h3>เข้าสู่ระบบผู้ดูแลระบบ</h3>
-                <p>กรุณาระบุรหัสผ่านควบคุม (Admin Password) ของโรงเรียนเพื่อเข้าจัดการระบบและดึงข้อมูลรายงาน</p>
+                <p>ลงชื่อเข้าใช้บัญชีผู้ดูแลระบบของโรงเรียน</p>
                 
                 <div class="input-group" style="margin-bottom: 1.5rem; text-align: left;">
-                    <label for="admin-passcode-input">รหัสผ่านควบคุม</label>
-                    <input type="password" id="admin-passcode-input" placeholder="กรอกรหัสผ่าน..." onkeypress="handleAdminLoginKeyPress(event)">
+                    <label for="admin-email-input">อีเมล</label>
+                    <input type="email" id="admin-email-input" autocomplete="username" placeholder="name@school.ac.th" onkeypress="handleAdminLoginKeyPress(event)">
+                    <label for="admin-passcode-input" style="margin-top: 12px;">รหัสผ่าน</label>
+                    <input type="password" id="admin-passcode-input" autocomplete="current-password" placeholder="กรอกรหัสผ่าน..." onkeypress="handleAdminLoginKeyPress(event)">
                 </div>
                 
                 <button class="btn-primary" style="width: 100%;" onclick="attemptAdminLogin()">
@@ -573,11 +575,6 @@
                             </div>
 
                             <div class="input-group">
-                                <label for="admin-settings-admin-password">รหัสผ่านควบคุม Admin ใหม่</label>
-                                <input type="password" id="admin-settings-admin-password" placeholder="ใส่รหัสผ่านใหม่หากต้องการแก้ไข...">
-                            </div>
-
-                            <div class="input-group">
                                 <label for="admin-settings-start-time">วันเวลาเปิดรับสมัคร</label>
                                 <input type="datetime-local" id="admin-settings-start-time">
                             </div>
@@ -781,8 +778,8 @@
                         <!-- ส่วนตรวจสอบสิทธิ์ด้วยเลขประจำตัว -->
                         <div class="id-verification-row">
                         <div class="input-group">
-                            <label for="student-id-input">รหัสอ้างอิง</label>
-                            <input type="text" id="student-id-input" placeholder="เลขประจำตัวนักเรียน หรือ เบอร์โทรศัพท์..." onkeypress="handleVerifyIdKeyPress(event)">
+                            <label for="student-id-input">รหัสนักเรียน หรือข้อมูลอ้างอิงนักเรียนใหม่</label>
+                            <input type="text" id="student-id-input" placeholder="รหัสนักเรียน หรือเบอร์ 10 หลัก / TMP-XXXXXX" autocomplete="off" onkeypress="handleVerifyIdKeyPress(event)">
                         </div>
                         <button class="verify-id-btn" onclick="verifyStudentID()">
                             <i class="fa-solid fa-circle-check"></i> ตรวจสอบ
@@ -887,7 +884,7 @@
                             <span class="val" id="ticket-student-level">ม.4/1</span>
                         </div>
                         <div class="ticket-field">
-                            <span class="label">เลขประจำตัวนักเรียน</span>
+                            <span class="label">รหัสนักเรียน / ข้อมูลอ้างอิง</span>
                             <span class="val" id="ticket-student-id">10001</span>
                         </div>
                         <div class="ticket-field">

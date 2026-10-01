@@ -1855,6 +1855,12 @@ input[type="checkbox"]:checked + .toggle-switch::after {
     box-shadow: 0 4px 10px rgba(52, 211, 153, 0.2);
 }
 
+.verified-card-badge.pending {
+    background: #7dd3fc;
+    color: #082f49;
+    box-shadow: 0 4px 10px rgba(56, 189, 248, 0.2);
+}
+
 .student-avatar {
     width: 56px;
     height: 56px;
@@ -1915,4 +1921,3 @@ input[type="checkbox"]:checked + .toggle-switch::after {
         box-shadow: 0 0 0 0px rgba(52, 211, 153, 0);
     }
 }
-

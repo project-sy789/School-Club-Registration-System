@@ -14,7 +14,8 @@ DROP TABLE IF EXISTS audit_logs CASCADE;
 -- 2. สร้างตารางการตั้งค่าระบบ (Settings)
 CREATE TABLE settings (
     key TEXT PRIMARY KEY,
-    value JSONB NOT NULL
+    value JSONB NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- บันทึกการตั้งค่าเริ่มต้น (ชื่อโรงเรียน, ช่วงเวลาเปิด-ปิด)
@@ -23,7 +24,6 @@ INSERT INTO settings (key, value) VALUES
     "school_name": "โรงเรียนมัธยมศึกษารวมวิทยายน",
     "academic_year": "2569",
     "semester": "1",
-    "admin_password": "admin-password-1234",
     "logo_base64": null
 }'::jsonb),
 ('registration_period', '{
@@ -32,10 +32,9 @@ INSERT INTO settings (key, value) VALUES
     "end_time": "2026-05-25T16:30:00"
 }'::jsonb);
 
--- เปิดใช้งาน RLS สำหรับ Settings (เพื่อให้หน้าเว็บอ่านและบันทึกการตั้งค่าระบบได้)
+-- เปิดใช้งาน RLS สำหรับ Settings; การเขียนจริงจะเปิดผ่าน admin policy ใน migration
 ALTER TABLE settings ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow public read access to settings" ON settings FOR SELECT USING (true);
-CREATE POLICY "Allow public all access to settings" ON settings FOR ALL USING (true);
 
 
 -- 3. สร้างตารางรายชื่อชุมนุม (Clubs)
@@ -54,12 +53,12 @@ CREATE TABLE clubs (
 -- เปิดใช้งาน RLS สำหรับ Clubs (เพื่อให้ทุกคนดึงข้อมูลชุมนุมได้โดยไม่ต้อง Login)
 ALTER TABLE clubs ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow public read access to clubs" ON clubs FOR SELECT USING (true);
-CREATE POLICY "Allow public all access to clubs for testing" ON clubs FOR ALL USING (true); -- สำหรับความง่ายในการพัฒนาแบบไร้ Backend Server
 
 
 -- 4. สร้างตารางรายชื่อนักเรียนที่มีอยู่ในระบบ (Students)
 CREATE TABLE students (
-    student_id TEXT PRIMARY KEY, -- เลขประจำตัวนักเรียน
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id TEXT UNIQUE, -- เลขประจำตัวนักเรียน (ศิษย์เก่าอาจถูกปกปิดเป็น NULL)
     prefix TEXT, -- คำนำหน้าชื่อ เช่น เด็กชาย, นาย, นางสาว
     first_name TEXT NOT NULL,
     last_name TEXT NOT NULL,
@@ -70,15 +69,17 @@ CREATE TABLE students (
 
 -- เปิดใช้งาน RLS สำหรับ Students
 ALTER TABLE students ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Allow public read access to students" ON students FOR SELECT USING (true);
-CREATE POLICY "Allow public insert/update/delete for admin" ON students FOR ALL USING (true);
 
 
 -- 5. สร้างตารางการลงทะเบียนนักเรียน (Registrations)
 CREATE TABLE registrations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    registration_token UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    request_key UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
     club_id UUID REFERENCES clubs(id) ON DELETE CASCADE,
     student_id TEXT, -- สามารถเป็น NULL ได้ สำหรับนักเรียนใหม่ที่ไม่มีเลขในระบบ
+    pending_contact_hash TEXT,
+    pending_contact_hint TEXT,
     prefix TEXT, -- คำนำหน้าชื่อ เช่น เด็กชาย, นาย, นางสาว
     first_name TEXT NOT NULL,
     last_name TEXT NOT NULL,
@@ -95,9 +96,6 @@ CREATE INDEX IF NOT EXISTS idx_registrations_term ON registrations(academic_year
 
 -- เปิดใช้งาน RLS สำหรับ Registrations
 ALTER TABLE registrations ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Allow public read access to registrations" ON registrations FOR SELECT USING (true);
-CREATE POLICY "Allow public insert registrations" ON registrations FOR INSERT WITH CHECK (true);
-CREATE POLICY "Allow public update/delete for admin" ON registrations FOR ALL USING (true);
 
 
 -- 6. สร้างตารางบันทึกประวัติความปลอดภัยและการกระทำระบบ (Audit Logs)
@@ -115,8 +113,6 @@ CREATE TABLE audit_logs (
 
 -- เปิดใช้งาน RLS สำหรับ audit_logs
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Allow public insert access to audit_logs" ON audit_logs FOR INSERT WITH CHECK (true);
-CREATE POLICY "Allow read access to audit_logs for admin" ON audit_logs FOR SELECT USING (true);
 
 
 -- =====================================================================
@@ -509,7 +505,6 @@ EXCEPTION WHEN OTHERS THEN
     RETURN jsonb_build_object('success', false, 'message', SQLERRM);
 END;
 $$;
-
 
 -- =====================================================================
 -- 🆕 STORED PROC: start_new_term(p_year, p_semester)
@@ -932,3 +927,15 @@ EXCEPTION WHEN OTHERS THEN
     RETURN jsonb_build_object('success', false, 'message', SQLERRM);
 END;
 $$;
+
+-- Keep bootstrap utilities private until migrate_backend_hardening.sql adds
+-- authenticated admin wrappers and the public registration RPC.
+REVOKE ALL ON FUNCTION register_student_atomic(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION decrement_club_seats(UUID) FROM PUBLIC;
+REVOKE ALL ON FUNCTION bulk_register_atomic(JSONB, TEXT, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION promote_all_students(TEXT, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION start_new_term(TEXT, TEXT, TEXT, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION anonymize_graduated_students(INT, TEXT, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION delete_graduated_student(UUID, TEXT, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION list_archived_terms() FROM PUBLIC;
+REVOKE ALL ON FUNCTION rollback_to_term(TEXT, TEXT, TEXT, TEXT) FROM PUBLIC;
