@@ -65,6 +65,11 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
+    const registrationScopeSelect = document.getElementById("admin-settings-registration-scope");
+    if (registrationScopeSelect) {
+        registrationScopeSelect.addEventListener("change", updateRegistrationScopeSettingsUI);
+    }
+
     initSupabaseConnection();
 });
 
@@ -3077,6 +3082,7 @@ function renderAdminSettings() {
     document.getElementById("admin-settings-academic-year").value = config.academic_year || "";
     document.getElementById("admin-settings-semester").value = config.semester || "";
     document.getElementById("admin-settings-registration-scope").value = config.registration_scope === "academic_year" ? "academic_year" : "semester";
+    updateRegistrationScopeSettingsUI();
 
     // 🖼️ แสดงพรีวิวรูปภาพโลโก้เดิม
     const previewBox = document.getElementById("settings-logo-preview");
@@ -3103,6 +3109,23 @@ function renderAdminSettings() {
     }
 }
 
+function updateRegistrationScopeSettingsUI() {
+    const scopeSelect = document.getElementById("admin-settings-registration-scope");
+    const semesterGroup = document.getElementById("admin-settings-semester-group");
+    const semesterSelect = document.getElementById("admin-settings-semester");
+    const note = document.getElementById("admin-settings-semester-scope-note");
+    if (!scopeSelect || !semesterGroup || !semesterSelect) return;
+
+    const annual = scopeSelect.value === "academic_year";
+    semesterGroup.style.display = annual ? "none" : "block";
+    semesterSelect.setAttribute("aria-hidden", annual ? "true" : "false");
+    if (note) {
+        note.textContent = annual
+            ? "โหมดรายปีจะไม่ใช้ภาคเรียนในการตัดสิทธิ์สมัคร ช่องนี้จะแสดงเฉพาะเมื่อเลือกโหมดรายภาคเรียน"
+            : "ใช้สำหรับระบุรอบปัจจุบันและเก็บประวัติ";
+    }
+}
+
 function formatISOToLocalInput(isoString) {
     const date = new Date(isoString);
     const tzOffset = date.getTimezoneOffset() * 60000; // แปลงส่วนต่างโซนเวลา
@@ -3121,7 +3144,7 @@ async function saveSystemSettings() {
 
     const schoolName = document.getElementById("admin-settings-school-name").value.trim();
     const academicYear = document.getElementById("admin-settings-academic-year").value.trim();
-    const semester = document.getElementById("admin-settings-semester").value.trim();
+    const semesterInput = document.getElementById("admin-settings-semester").value.trim();
     const registrationScope = document.getElementById("admin-settings-registration-scope").value === "academic_year"
         ? "academic_year"
         : "semester";
@@ -3130,8 +3153,9 @@ async function saveSystemSettings() {
     const start_time = document.getElementById("admin-settings-start-time").value;
     const end_time = document.getElementById("admin-settings-end-time").value;
 
-    if (!schoolName || !academicYear || !semester) {
-        showToast("กรุณากรอกข้อมูลตั้งค่าหลักให้ครบถ้วน (ชื่อ, ปีการศึกษา, ภาคเรียน)", "warning");
+    const semester = semesterInput || "1";
+    if (!schoolName || !academicYear || (registrationScope === "semester" && !semesterInput)) {
+        showToast("กรุณากรอกชื่อโรงเรียนและปีการศึกษาให้ครบถ้วน", "warning");
         return;
     }
 
@@ -3160,12 +3184,21 @@ async function saveSystemSettings() {
         if (res2.error) throw res2.error;
 
         const { data: reconcileResult, error: reconcileError } = await supabaseClient.rpc("admin_reconcile_club_counts");
-        if (reconcileError) throw reconcileError;
+        const reconcileFunctionMissing = reconcileError
+            && (reconcileError.code === "42883" || reconcileError.code === "PGRST202");
+        if (reconcileError && !reconcileFunctionMissing) throw reconcileError;
         if (reconcileResult && reconcileResult.success === false) {
             throw new Error(reconcileResult.message || "ไม่สามารถคำนวณจำนวนที่นั่งใหม่ได้");
         }
 
-        showToast("บันทึกการปรับแต่งตั้งค่าโครงสร้างระบบเรียบร้อยแล้ว", "success");
+        const migrationMissing = Boolean(reconcileFunctionMissing);
+
+        showToast(
+            migrationMissing
+                ? "บันทึกการตั้งค่าแล้ว แต่ต้องรัน migrate_backend_hardening.sql เวอร์ชันล่าสุดเพื่อเปิดใช้กติกาโหมดรายปีครบถ้วน"
+                : "บันทึกการปรับแต่งตั้งค่าโครงสร้างระบบเรียบร้อยแล้ว",
+            migrationMissing ? "warning" : "success"
+        );
         
         // บันทึกประวัติความปลอดภัย (Audit Log)
         try {
@@ -3187,6 +3220,7 @@ async function saveSystemSettings() {
         updateSystemUI();
     } catch (e) {
         console.error("Error saving settings:", e);
+        showToast(`บันทึกการตั้งค่าไม่สำเร็จ: ${e.message || e}`, "error");
     }
 }
 

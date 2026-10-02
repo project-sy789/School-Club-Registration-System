@@ -566,12 +566,13 @@
                                 <input type="text" id="admin-settings-academic-year" placeholder="เช่น 2569">
                             </div>
 
-                            <div class="input-group">
+                            <div class="input-group" id="admin-settings-semester-group">
                                 <label for="admin-settings-semester">ภาคเรียน</label>
                                 <select id="admin-settings-semester">
                                     <option value="1">ภาคเรียนที่ 1</option>
                                     <option value="2">ภาคเรียนที่ 2</option>
                                 </select>
+                                <p id="admin-settings-semester-scope-note" style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 4px;">ใช้สำหรับระบุรอบปัจจุบันและเก็บประวัติ</p>
                             </div>
 
                             <div class="input-group">
@@ -1122,6 +1123,6 @@
     <!-- 💻 6. Javascript Logic Engine -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="config.js?v=1.1.2"></script>
-    <script src="app.js?v=1.2.4"></script>
+    <script src="app.js?v=1.2.5"></script>
 </body>
 </html>
