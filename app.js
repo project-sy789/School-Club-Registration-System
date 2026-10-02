@@ -143,19 +143,42 @@ async function getUserIpAddress() {
 // 🔑 1. SUPABASE CLIENT SET-UP & INITIALIZATION
 // =====================================================================
 async function syncAdminSession(session) {
+    state.adminPermissionError = null;
     if (!session || !supabaseClient) {
         state.isAdminLoggedIn = false;
         return false;
     }
 
     const { data, error } = await supabaseClient.rpc("is_admin");
-    if (error || data !== true) {
+    if (error) {
+        state.adminPermissionError = error;
+        console.error("Admin permission check failed:", error);
+        state.isAdminLoggedIn = false;
+        return false;
+    }
+    if (data !== true) {
+        state.adminPermissionError = { code: "NOT_ADMIN" };
         state.isAdminLoggedIn = false;
         return false;
     }
 
     state.isAdminLoggedIn = true;
     return true;
+}
+
+function getAdminAuthErrorMessage(error) {
+    const code = error?.code || error?.status;
+    const message = String(error?.message || "").toLowerCase();
+    if (code === "email_not_confirmed" || message.includes("email not confirmed")) {
+        return "อีเมลนี้ยังไม่ได้ยืนยัน ให้เปิดอีเมลยืนยันจาก Supabase หรือเปิด Auto Confirm User แล้วลองใหม่";
+    }
+    if (code === "invalid_credentials" || message.includes("invalid login credentials")) {
+        return "อีเมลหรือรหัสผ่านไม่ถูกต้อง ตรวจสอบว่ากำลังใช้บัญชีใน Supabase Project เดียวกับเว็บไซต์";
+    }
+    if (code === "email_provider_disabled" || message.includes("email provider is disabled")) {
+        return "Supabase ยังไม่ได้เปิด Email provider ไปที่ Authentication > Providers > Email แล้วเปิดใช้งานก่อน";
+    }
+    return "เข้าสู่ระบบไม่สำเร็จ กรุณาตรวจสอบการตั้งค่า Supabase Auth";
 }
 
 function initSupabaseConnection() {
@@ -1529,9 +1552,24 @@ async function attemptAdminLogin() {
     }
 
     const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password: entered });
-    if (error || !data?.session || !(await syncAdminSession(data.session))) {
+    if (error) {
+        console.error("Admin login failed:", error);
+        showToast(getAdminAuthErrorMessage(error), "error");
+        return;
+    }
+    if (!data?.session) {
+        showToast("เข้าสู่ระบบไม่สำเร็จ ไม่ได้รับ session จาก Supabase", "error");
+        return;
+    }
+    if (!(await syncAdminSession(data.session))) {
         await supabaseClient.auth.signOut();
-        showToast("รหัสผ่านควบคุมไม่ถูกต้อง กรุณาตรวจสอบรหัสผ่านอีกครั้ง", "error");
+        if (state.adminPermissionError?.code === "42883") {
+            showToast("บัญชีถูกต้อง แต่ฐานข้อมูลยังไม่มีฟังก์ชันสิทธิ์ผู้ดูแล กรุณารัน migrate_backend_hardening.sql", "error");
+        } else if (state.adminPermissionError?.code === "NOT_ADMIN") {
+            showToast("บัญชีเข้าสู่ระบบได้แล้ว แต่ยังไม่มีสิทธิ์ผู้ดูแล ให้เพิ่ม User UID ลงในตาราง admin_users", "error");
+        } else {
+            showToast("บัญชีเข้าสู่ระบบได้แล้ว แต่ตรวจสอบสิทธิ์ผู้ดูแลไม่สำเร็จ กรุณาตรวจสอบ migration และ User UID", "error");
+        }
         return;
     }
 

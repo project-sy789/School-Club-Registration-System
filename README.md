@@ -113,16 +113,26 @@
 
 ## 🔒 ตั้งค่าผู้ดูแลระบบ (Supabase Auth)
 
-1. ไปที่ Supabase **Authentication → Users → Add user** และสร้างบัญชีอีเมล/รหัสผ่านของครูผู้ดูแล
-2. คัดลอก UUID ของผู้ใช้ แล้วรัน SQL นี้ใน SQL Editor:
+1. ไปที่ Supabase **Authentication → Users → Add user** และสร้างบัญชีอีเมล/รหัสผ่านของครูผู้ดูแล โดยเลือก **Auto Confirm User** ถ้ามีตัวเลือกนี้ หรือเปิดลิงก์ยืนยันอีเมลให้เรียบร้อยก่อนล็อกอิน
+2. คัดลอก **User UID** ของผู้ใช้ แล้วรัน SQL นี้ใน SQL Editor ของโปรเจกต์เดียวกับเว็บไซต์:
 
 ```sql
-insert into public.admin_users (user_id)
-values ('ใส่-UUID-ของผู้ดูแลที่นี่');
+insert into public.admin_users (user_id, role, enabled)
+values ('ใส่-User-UID-ของผู้ดูแลที่นี่', 'admin', true)
+on conflict (user_id)
+do update set role = 'admin', enabled = true;
 ```
 
 3. ปิดการสมัครสมาชิกสาธารณะใน **Authentication → Providers → Email** เพื่อไม่ให้บุคคลทั่วไปสร้างบัญชีเอง
-4. หลัง migration แล้ว ผู้ใช้ anonymous จะอ่านตารางนักเรียน/ผู้สมัครไม่ได้ หน้าแอดมินจะใช้ Supabase Auth และตรวจสิทธิ์จาก `admin_users`
+4. ตรวจสอบว่าเพิ่ม UID ถูกคนด้วยคำสั่งนี้:
+
+```sql
+select au.user_id, au.role, au.enabled, u.email
+from public.admin_users au
+join auth.users u on u.id = au.user_id;
+```
+
+5. หลัง migration แล้ว ผู้ใช้ anonymous จะอ่านตารางนักเรียน/ผู้สมัครไม่ได้ หน้าแอดมินจะใช้ Supabase Auth และตรวจสิทธิ์จาก `admin_users` หากเว็บแจ้งว่าไม่มีฟังก์ชันสิทธิ์ผู้ดูแล ให้รัน `supabase/migrate_backend_hardening.sql` ก่อน
 
 รหัสบัตรประชาชนไม่ควรถูกใช้เป็นตัวระบุสำรอง ระบบรับเฉพาะเบอร์โทรศัพท์ผู้ปกครอง 10 หลักที่ขึ้นต้นด้วย 0 หรือรหัสสมัครชั่วคราวรูปแบบ `TMP-XXXXXX` สำหรับรายการ Pending และเก็บค่าดังกล่าวในรูป hash กับเลขท้าย 4 หลักเท่านั้น
 
