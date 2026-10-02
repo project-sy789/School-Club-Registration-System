@@ -89,14 +89,42 @@ function getCurrentTerm() {
     };
 }
 
-// กติกาการสมัคร: รายภาคเรียน (ค่าเดิม) หรือสมัครครั้งเดียวใช้ชุมนุมเดิมทั้งปี
+// กติกาการสมัคร: รายภาคเรียน (ค่าเดิม) หรือสมัครครั้งเดียวต่อปีการศึกษา
 function getRegistrationScope() {
     const config = (state.settings && state.settings.school_config) || {};
     return config.registration_scope === "academic_year" ? "academic_year" : "semester";
 }
 
 function getRegistrationScopeLabel() {
-    return getRegistrationScope() === "academic_year" ? "ใช้ชุมนุมเดิมตลอดปีการศึกษา" : "ลงทะเบียนแยกทุกภาคเรียน";
+    return getRegistrationScope() === "academic_year" ? "สมัครครั้งเดียวต่อปีการศึกษา" : "ลงทะเบียนแยกทุกภาคเรียน";
+}
+
+// ทำให้ค่าระดับชั้นจากฐานข้อมูล/ฟอร์มใช้รูปแบบเดียวกัน เช่น ม.4/1 -> ม.4
+function normalizeGradeValue(value) {
+    const text = String(value || "").trim().replace(/\s+/g, "");
+    const match = text.match(/^ม\.?([1-6])/);
+    return match ? `ม.${match[1]}` : text;
+}
+
+function getClubGrades(club) {
+    let rawGrades = club?.grades;
+    if (typeof rawGrades === "string") {
+        const text = rawGrades.trim();
+        try {
+            const parsed = JSON.parse(text);
+            rawGrades = Array.isArray(parsed) ? parsed : text;
+        } catch (_) {
+            rawGrades = text.replace(/^\{/, "").replace(/\}$/, "").split(/[;,|]/);
+        }
+    }
+    return (Array.isArray(rawGrades) ? rawGrades : [])
+        .map(value => String(value || "").replace(/^['"]|['"]$/g, ""))
+        .map(normalizeGradeValue)
+        .filter(Boolean);
+}
+
+function getStudentGradePrefix(studentInfo) {
+    return normalizeGradeValue(studentInfo?.level);
 }
 
 function isRegistrationForCurrentScope(registration) {
@@ -264,11 +292,11 @@ function updateSystemUI() {
     const annualScope = getRegistrationScope() === "academic_year";
     document.getElementById("header-school-name").innerText = config.school_name || "ระบบลงทะเบียนชุมนุม";
     document.getElementById("header-semester-label").innerText = annualScope
-        ? `ปีการศึกษา ${term.academic_year} · ใช้ชุมนุมเดิมทั้งปี`
+        ? `ปีการศึกษา ${term.academic_year}`
         : `ภาคเรียนที่ ${term.semester}/${term.academic_year}`;
     document.getElementById("banner-school-title").innerText = `ยินดีต้อนรับสู่ระบบลงทะเบียนชุมนุม ${config.school_name || ""}`;
     document.getElementById("banner-semester-badge").innerText = annualScope
-        ? `ลงทะเบียนครั้งเดียว · ใช้ชุมนุมเดิมตลอดปีการศึกษา ${term.academic_year}`
+        ? `สมัครครั้งเดียว · ปีการศึกษา ${term.academic_year}`
         : `ภาคเรียนที่ ${term.semester} ปีการศึกษา ${term.academic_year}`;
     document.getElementById("ticket-school-name").innerText = config.school_name || "";
 
@@ -460,22 +488,24 @@ function renderClubsGrid() {
     // ดึงค่าการค้นหาและฟิลเตอร์
     const searchVal = document.getElementById("search-input").value.toLowerCase().trim();
     const gradeVal = document.getElementById("filter-grade").value;
+    const normalizedGradeVal = normalizeGradeValue(gradeVal);
     const availabilityVal = document.getElementById("filter-availability").value;
 
     const filtered = state.clubs.filter(club => {
+        const clubGrades = getClubGrades(club);
         // ค้นหาข้อความชื่อหรือครู
-        const matchSearch = club.name.toLowerCase().includes(searchVal) || 
-                            club.teacher.toLowerCase().includes(searchVal) ||
-                            (club.description && club.description.toLowerCase().includes(searchVal));
+        const matchSearch = String(club.name || "").toLowerCase().includes(searchVal) ||
+                            String(club.teacher || "").toLowerCase().includes(searchVal) ||
+                            String(club.description || "").toLowerCase().includes(searchVal);
         
         // คัดกรองระดับชั้นที่เปิดรับ
-        const matchGrade = gradeVal === 'all' || club.grades.includes(gradeVal);
+        const matchGrade = gradeVal === 'all' || clubGrades.includes(normalizedGradeVal);
 
         // คัดกรองเฉพาะห้องเรียนตัวเอง (ถ้าเปิดใช้งาน)
         let matchMyGrade = true;
-        if (state.myGradesFilterOnly && state.currentStudentInfo) {
-            const levelPrefix = state.currentStudentInfo.level.split('/')[0]; // ดึง เช่น "ม.4" จาก "ม.4/1"
-            matchMyGrade = club.grades.includes(levelPrefix);
+        if (state.myGradesFilterOnly) {
+            const levelPrefix = getStudentGradePrefix(state.currentStudentInfo);
+            matchMyGrade = Boolean(levelPrefix) && clubGrades.includes(levelPrefix);
         }
 
         // คัดกรองสถานะที่นั่ง
@@ -514,7 +544,7 @@ function renderClubsGrid() {
         else if (pct >= 70) pctClass = "warning";
 
         // รวบรวมรายชื่อระดับชั้นมาแสดงเป็น Badge
-        const gradeBadgesHtml = club.grades.map(g => `<span class="grade-badge">${g}</span>`).join(" ");
+        const gradeBadgesHtml = getClubGrades(club).map(g => `<span class="grade-badge">${g}</span>`).join(" ");
 
         // เช็คว่านักเรียนคนนี้ลงทะเบียนแล้วหรือยังตามขอบเขตที่โรงเรียนกำหนด
         const myRegs = (state.myRegistrations || []).filter(isRegistrationForCurrentScope);
@@ -581,12 +611,15 @@ function filterClubs() {
 
 function toggleFilterMyGrades() {
     const checkbox = document.getElementById("my-grades-only");
+    if (!state.currentStudentInfo) {
+        checkbox.checked = false;
+        state.myGradesFilterOnly = false;
+        showToast("กรุณาระบุตัวตนนักเรียนก่อน จึงจะกรองชุมนุมตามระดับชั้นได้", "info");
+        renderClubsGrid();
+        return;
+    }
     checkbox.checked = !checkbox.checked;
     state.myGradesFilterOnly = checkbox.checked;
-    
-    if (state.myGradesFilterOnly && !state.currentStudentInfo) {
-        showToast("กรุณากรอกเลขประจำตัวนักเรียนของคุณในช่อง 'ระบุตัวตน' ด้านบนก่อนเพื่อค้นหาระดับชั้นจริงโดยอัตโนมัติ!", "info");
-    }
     
     renderClubsGrid();
 }
@@ -609,7 +642,7 @@ async function quickVerifyStudent() {
             state.currentStudentInfo = data;
             
             // 1. ดึงระดับชั้นมา เช่น "ม.4" จาก "ม.4/1"
-            const levelPrefix = data.level.split('/')[0];
+            const levelPrefix = getStudentGradePrefix(data);
             
             // 2. อัปเดต dropdown ระดับชั้นที่หน้าแรกให้เป็นห้องเรียนของเด็กโดยอัตโนมัติ
             document.getElementById("filter-grade").value = levelPrefix;
@@ -777,7 +810,7 @@ function saveQuickNewStudent() {
     };
     state.isNewStudentPreRegistering = false;
 
-    const levelPrefix = level.split('/')[0];
+    const levelPrefix = normalizeGradeValue(level);
     document.getElementById("filter-grade").value = levelPrefix;
     
     const checkbox = document.getElementById("my-grades-only");
@@ -1074,7 +1107,7 @@ async function verifyStudentID() {
             prefillLevelDropdownAndEnsureOption(data.level);
             
             // อัปเดต UI คัดกรองของระดับชั้นนั้นทันทีเพื่อความสะดวก
-            const userGradePrefix = data.level.split('/')[0];
+            const userGradePrefix = getStudentGradePrefix(data);
             document.getElementById("filter-grade").value = userGradePrefix;
             
             // อัปเดตส่วนคัดกรองหน้าแรกด้วย
@@ -1172,9 +1205,10 @@ async function submitStudentRegistration() {
     }
 
     // 2. ตรวจสอบเงื่อนไขระดับชั้น (Frontend Check ก่อนยิงไปตัดที่นั่งจริง)
-    const levelPrefix = level.split('/')[0]; // ดึง "ม.4" จาก "ม.4/1"
-    if (!state.currentClub.grades.includes(levelPrefix)) {
-        showToast(`ขออภัย ชุมนุมนี้ไม่เปิดรับสมัครสำหรับระดับชั้น ${levelPrefix} (รับเฉพาะชั้น: ${state.currentClub.grades.join(', ')})`, "error");
+    const levelPrefix = normalizeGradeValue(level);
+    const currentClubGrades = getClubGrades(state.currentClub);
+    if (!currentClubGrades.includes(levelPrefix)) {
+        showToast(`ขออภัย ชุมนุมนี้ไม่เปิดรับสมัครสำหรับระดับชั้น ${levelPrefix} (รับเฉพาะชั้น: ${currentClubGrades.join(', ')})`, "error");
         return;
     }
 
@@ -4010,7 +4044,7 @@ async function startNewTerm() {
     const sameAcademicYear = academicYear === getCurrentTerm().academic_year;
     const annualScope = getRegistrationScope() === "academic_year";
     const seatWarning = annualScope && sameAcademicYear
-        ? "• โรงเรียนใช้ชุมนุมเดิมทั้งปี จำนวนสมาชิกเดิมจะคงอยู่และไม่รีเซ็ต\n"
+        ? "• จำนวนสมาชิกของปีการศึกษานี้จะคงอยู่และไม่รีเซ็ต\n"
         : "• ที่นั่งของทุกชุมนุมจะถูกรีเซ็ตเป็น 0\n";
     const warning =
         `⚠️ ยืนยันเริ่มเทอมใหม่: ${semester}/${academicYear}?\n\n` +
