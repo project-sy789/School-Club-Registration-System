@@ -37,7 +37,7 @@ let state = {
     adminUsers: [],
     auditLogs: [], // เก็บประวัติความปลอดภัยระบบ
     settings: {
-        school_config: { school_name: "ระบบลงทะเบียนชุมนุม", semester: "1", academic_year: "2569", registration_scope: "semester" },
+        school_config: { school_name: "ระบบลงทะเบียนชุมนุม", semester: "1", academic_year: "2569", registration_scope: "semester", allow_student_cancellation: false },
         registration_period: { is_active: true, start_time: "", end_time: "" }
     },
     currentClub: null,
@@ -110,6 +110,15 @@ function getRegistrationScope() {
 
 function getRegistrationScopeLabel() {
     return getRegistrationScope() === "academic_year" ? "สมัครครั้งเดียวต่อปีการศึกษา" : "ลงทะเบียนแยกทุกภาคเรียน";
+}
+
+function isRegistrationWindowOpen() {
+    const period = state.settings.registration_period || {};
+    if (!period.is_active) return false;
+    const now = Date.now();
+    const start = period.start_time ? new Date(period.start_time).getTime() : null;
+    const end = period.end_time ? new Date(period.end_time).getTime() : null;
+    return (!start || now >= start) && (!end || now <= end);
 }
 
 // ทำให้ค่าระดับชั้นจากฐานข้อมูล/ฟอร์มใช้รูปแบบเดียวกัน เช่น ม.4/1 -> ม.4
@@ -413,6 +422,9 @@ function startCountdownTimer() {
         if (prevRegState !== null && prevRegState !== currentRegState) {
             console.log(`[Countdown] System registration state transitioned from "${prevRegState}" to "${currentRegState}". Re-rendering clubs grid...`);
             renderClubsGrid();
+            if (state.currentStudentInfo) {
+                renderMyRegistrations();
+            }
             
             if (currentRegState === "open") {
                 showToast("⏰ ขณะนี้ระบบได้เปิดให้ลงทะเบียนเข้าชุมนุมเรียบร้อยแล้ว!", "success");
@@ -993,6 +1005,8 @@ async function renderMyRegistrations() {
                 ? `<span class="ticket-status-badge verified" style="font-size:0.7rem; padding:2px 8px;">ยืนยันแล้ว</span>`
                 : `<span class="ticket-status-badge pending" style="font-size:0.7rem; padding:2px 8px;">สำรองสิทธิ์</span>`;
             const meta = [teacher && `<i class="fa-solid fa-user-tie"></i> ${teacher}`, location && `<i class="fa-solid fa-location-dot"></i> ${location}`].filter(Boolean).join(" &nbsp;·&nbsp; ");
+            const canCancel = Boolean(state.settings.school_config?.allow_student_cancellation)
+                && isRegistrationWindowOpen();
             return `
                 <div style="background: rgba(7,23,15,0.5); border:1px solid rgba(52,211,153,0.25); border-radius: 10px; padding: 10px 12px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:4px;">
@@ -1001,6 +1015,12 @@ async function renderMyRegistrations() {
                     </div>
                     ${meta ? `<div style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 2px;">${meta}</div>` : ""}
                     ${date ? `<div style="font-size: 0.7rem; color: var(--text-muted);">ลงทะเบียนเมื่อ ${date} น.</div>` : ""}
+                    <button type="button" class="btn-secondary" onclick="openRegistrationTicket('${reg.id}')" style="margin-top:8px; width:100%; padding:7px 10px; font-size:0.78rem; display:flex; align-items:center; justify-content:center; gap:6px;">
+                        <i class="fa-solid fa-ticket"></i> ดูใบยืนยันการลงทะเบียน
+                    </button>
+                    ${canCancel ? `<button type="button" class="btn-danger-outline" onclick="cancelMyRegistration('${reg.id}')" style="margin-top:6px; width:100%; padding:7px 10px; font-size:0.78rem; display:flex; align-items:center; justify-content:center; gap:6px;">
+                        <i class="fa-solid fa-arrow-right-arrow-left"></i> ยกเลิกเพื่อเปลี่ยนชุมนุม
+                    </button>` : ""}
                 </div>
             `;
         }).join("");
@@ -1033,6 +1053,85 @@ async function renderMyRegistrations() {
     }
 }
 window.renderMyRegistrations = renderMyRegistrations;
+
+// เปิดใบยืนยันเดิมจากรายการที่โหลดไว้ โดยไม่เปิด flow สมัครซ้ำ
+function openRegistrationTicket(registrationId) {
+    const registration = (state.myRegistrations || []).find(reg => String(reg.id) === String(registrationId));
+    if (!registration) {
+        showToast("ไม่พบข้อมูลใบยืนยันนี้ กรุณายืนยันตัวตนนักเรียนใหม่อีกครั้ง", "warning");
+        return;
+    }
+
+    const club = registration.clubs || {};
+    const studentName = `${registration.prefix || ""}${registration.first_name || ""} ${registration.last_name || ""}`.trim();
+    const reference = registration.registration_status === "pending" && registration.pending_contact_hint
+        ? `เบอร์อ้างอิงท้าย ${registration.pending_contact_hint}`
+        : (registration.student_id || "นักเรียนใหม่ (รอการจัดเลข)");
+
+    document.getElementById("ticket-school-name").innerText = state.settings.school_config?.school_name || "";
+    document.getElementById("ticket-club-name").innerText = club.name || "ไม่ระบุชุมนุม";
+    document.getElementById("ticket-student-name").innerText = studentName || "ไม่ระบุชื่อ";
+    document.getElementById("ticket-student-level").innerText = registration.level || "-";
+    document.getElementById("ticket-student-id").innerText = reference;
+    document.getElementById("ticket-location-teacher").innerHTML = `<i class="fa-solid fa-location-dot"></i> ${club.location || "ไม่ระบุสถานที่"} &nbsp;&nbsp;&nbsp; <i class="fa-solid fa-user-tie"></i> ${club.teacher || "ไม่ระบุครูผู้สอน"}`;
+
+    const badge = document.getElementById("ticket-status-badge");
+    if (registration.registration_status === "verified") {
+        badge.className = "ticket-status-badge verified";
+        badge.innerText = "ยืนยันแล้ว (เดิม)";
+    } else {
+        badge.className = "ticket-status-badge pending";
+        badge.innerText = "สำรองสิทธิ์ (นักเรียนใหม่)";
+    }
+
+    document.getElementById("modal-form-content").style.display = "none";
+    document.getElementById("modal-success-content").style.display = "block";
+    document.getElementById("registration-modal").classList.add("active");
+}
+window.openRegistrationTicket = openRegistrationTicket;
+
+async function cancelMyRegistration(registrationId) {
+    if (!supabaseClient || !state.currentStudentInfo) return;
+    if (!state.settings.school_config?.allow_student_cancellation || !isRegistrationWindowOpen()) {
+        showToast("ขณะนี้ไม่อยู่ในช่วงเวลาที่อนุญาตให้ยกเลิกการลงทะเบียน", "warning");
+        return;
+    }
+
+    const registration = (state.myRegistrations || []).find(reg => String(reg.id) === String(registrationId));
+    if (!registration) {
+        showToast("ไม่พบรายการลงทะเบียนที่ต้องการยกเลิก", "warning");
+        return;
+    }
+    const clubName = registration.clubs?.name || "ชุมนุมนี้";
+    if (!confirm(`ยืนยันยกเลิกการลงทะเบียนชุมนุม "${clubName}" หรือไม่?\n\nที่นั่งจะถูกคืนเข้าสู่ระบบ และคุณจะต้องเลือกชุมนุมใหม่ด้วยตนเอง`)) return;
+
+    const info = state.currentStudentInfo;
+    const payload = {
+        p_registration_id: registration.id,
+        p_student_id: info.is_pending_reference ? null : String(info.student_id || "").trim(),
+        p_reference: info.is_pending_reference ? String(info.student_id || "").trim() : null,
+        p_first_name: info.first_name || "",
+        p_last_name: info.last_name || "",
+        p_level: info.level || "",
+        p_registration_token: registration.registration_token || null,
+        p_ip_address: null,
+        p_user_agent: navigator.userAgent || "Unknown Device"
+    };
+
+    try {
+        const { data, error } = await supabaseClient.rpc("student_cancel_registration", payload);
+        if (error) throw error;
+        if (!data?.success) throw new Error(data?.message || "ไม่สามารถยกเลิกการลงทะเบียนได้");
+
+        showToast("ยกเลิกการลงทะเบียนแล้ว สามารถเลือกชุมนุมใหม่ได้ทันที", "success");
+        await loadClubsData();
+        await renderMyRegistrations();
+    } catch (error) {
+        console.error("Error cancelling student registration:", error);
+        showToast(error.message || "ไม่สามารถยกเลิกการลงทะเบียนได้", "error");
+    }
+}
+window.cancelMyRegistration = cancelMyRegistration;
 
 // ผูกคำร้องนักเรียนใหม่ในเครื่องนี้เข้ากับรหัสนักเรียนจริงที่เพิ่งยืนยัน
 async function claimPendingRegistrationsForStudent(studentId) {
@@ -3371,6 +3470,13 @@ function renderAdminSettings() {
     document.getElementById("admin-settings-academic-year").value = config.academic_year || "";
     document.getElementById("admin-settings-semester").value = config.semester || "";
     document.getElementById("admin-settings-registration-scope").value = config.registration_scope === "academic_year" ? "academic_year" : "semester";
+    const cancellationCheckbox = document.getElementById("admin-settings-allow-student-cancellation");
+    if (cancellationCheckbox) {
+        cancellationCheckbox.checked = Boolean(config.allow_student_cancellation);
+        document.getElementById("admin-settings-cancellation-label").innerText = cancellationCheckbox.checked
+            ? "เปิดให้นักเรียนยกเลิกได้ในช่วงเวลารับสมัคร"
+            : "ปิดการยกเลิกด้วยตนเอง";
+    }
     updateRegistrationScopeSettingsUI();
 
     // 🖼️ แสดงพรีวิวรูปภาพโลโก้เดิม
@@ -3428,6 +3534,15 @@ function toggleRegistrationState() {
     document.getElementById("admin-settings-status-label").innerText = cb.checked ? "เปิดระบบรับสมัครจริง" : "ปิดระบบรับสมัคร";
 }
 
+function toggleStudentCancellationState() {
+    const checkbox = document.getElementById("admin-settings-allow-student-cancellation");
+    if (!checkbox) return;
+    checkbox.checked = !checkbox.checked;
+    document.getElementById("admin-settings-cancellation-label").innerText = checkbox.checked
+        ? "เปิดให้นักเรียนยกเลิกได้ในช่วงเวลารับสมัคร"
+        : "ปิดการยกเลิกด้วยตนเอง";
+}
+
 async function saveSystemSettings() {
     if (!supabaseClient) return;
 
@@ -3437,6 +3552,7 @@ async function saveSystemSettings() {
     const registrationScope = document.getElementById("admin-settings-registration-scope").value === "academic_year"
         ? "academic_year"
         : "semester";
+    const allowStudentCancellation = Boolean(document.getElementById("admin-settings-allow-student-cancellation")?.checked);
 
     const is_active = document.getElementById("admin-settings-is-active").checked;
     const start_time = document.getElementById("admin-settings-start-time").value;
@@ -3453,6 +3569,7 @@ async function saveSystemSettings() {
         academic_year: academicYear,
         semester,
         registration_scope: registrationScope,
+        allow_student_cancellation: allowStudentCancellation,
         logo_base64: state.temp_logo_base64 || null
     };
 
@@ -3513,7 +3630,7 @@ async function saveSystemSettings() {
                 action: "SETTINGS_UPDATED",
                 ip_address: ipAddress,
                 user_agent: navigator.userAgent || "Unknown Device",
-                details: `ผู้ดูแลระบบแก้ไขการตั้งค่าระบบ: ชื่อโรงเรียน="${schoolName}", ปีการศึกษา="${academicYear}", ภาคเรียน="${semester}", รูปแบบสมัคร="${registrationScope === 'academic_year' ? 'รายปีการศึกษา' : 'รายภาคเรียน'}", สถานะเปิดรับสมัคร=${is_active ? 'เปิด' : 'ปิด'}`
+                details: `ผู้ดูแลระบบแก้ไขการตั้งค่าระบบ: ชื่อโรงเรียน="${schoolName}", ปีการศึกษา="${academicYear}", ภาคเรียน="${semester}", รูปแบบสมัคร="${registrationScope === 'academic_year' ? 'รายปีการศึกษา' : 'รายภาคเรียน'}", สถานะเปิดรับสมัคร=${is_active ? 'เปิด' : 'ปิด'}, อนุญาตยกเลิกเอง=${allowStudentCancellation ? 'เปิด' : 'ปิด'}`
             });
         } catch (logErr) {
             console.error("Failed to write settings audit log:", logErr);

@@ -29,6 +29,12 @@ SET value = value || jsonb_build_object('registration_scope', 'semester'),
 WHERE key = 'school_config'
   AND NOT (value ? 'registration_scope');
 
+UPDATE settings
+SET value = value || jsonb_build_object('allow_student_cancellation', false),
+    updated_at = now()
+WHERE key = 'school_config'
+  AND NOT (value ? 'allow_student_cancellation');
+
 ALTER TABLE students
     ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid();
 
@@ -1062,6 +1068,113 @@ BEGIN
 END;
 $$;
 
+-- Let a student release their own current registration while the school has
+-- explicitly enabled this option and the public registration window is open.
+-- Identity is checked server-side; the registration id alone is never enough.
+DROP FUNCTION IF EXISTS student_cancel_registration(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT);
+CREATE OR REPLACE FUNCTION student_cancel_registration(
+    p_registration_id UUID,
+    p_student_id TEXT DEFAULT NULL,
+    p_reference TEXT DEFAULT NULL,
+    p_first_name TEXT DEFAULT NULL,
+    p_last_name TEXT DEFAULT NULL,
+    p_level TEXT DEFAULT NULL,
+    p_registration_token UUID DEFAULT NULL,
+    p_ip_address TEXT DEFAULT NULL,
+    p_user_agent TEXT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions, private, pg_temp
+AS $$
+DECLARE
+    v_reg RECORD;
+    v_config JSONB;
+    v_period JSONB;
+    v_year TEXT;
+    v_semester TEXT;
+    v_scope TEXT;
+    v_reference_hash TEXT;
+    v_secret BYTEA;
+    v_student_id TEXT := NULLIF(btrim(p_student_id), '');
+    v_reference TEXT := NULLIF(btrim(p_reference), '');
+    v_first_name TEXT := NULLIF(btrim(p_first_name), '');
+    v_last_name TEXT := NULLIF(btrim(p_last_name), '');
+    v_level TEXT := NULLIF(btrim(p_level), '');
+BEGIN
+    SELECT value INTO v_config FROM settings WHERE key = 'school_config';
+    SELECT value INTO v_period FROM settings WHERE key = 'registration_period';
+
+    IF COALESCE((v_config->>'allow_student_cancellation')::BOOLEAN, false) IS NOT TRUE THEN
+        RETURN jsonb_build_object('success', false, 'code', 'CANCELLATION_DISABLED', 'message', 'ผู้ดูแลระบบยังไม่เปิดให้ยกเลิกการลงทะเบียนด้วยตนเอง');
+    END IF;
+    IF COALESCE((v_period->>'is_active')::BOOLEAN, false) IS NOT TRUE
+       OR (NULLIF(v_period->>'start_time', '') IS NOT NULL AND now() < (v_period->>'start_time')::TIMESTAMPTZ)
+       OR (NULLIF(v_period->>'end_time', '') IS NOT NULL AND now() > (v_period->>'end_time')::TIMESTAMPTZ) THEN
+        RETURN jsonb_build_object('success', false, 'code', 'REGISTRATION_CLOSED', 'message', 'หมดเวลาลงทะเบียนแล้ว ไม่สามารถยกเลิกหรือเปลี่ยนชุมนุมได้');
+    END IF;
+
+    v_year := COALESCE(v_config->>'academic_year', '2569');
+    v_semester := COALESCE(v_config->>'semester', '1');
+    v_scope := CASE WHEN v_config->>'registration_scope' = 'academic_year' THEN 'academic_year' ELSE 'semester' END;
+
+    SELECT r.*, c.name AS club_name
+    INTO v_reg
+    FROM registrations r
+    JOIN clubs c ON c.id = r.club_id
+    WHERE r.id = p_registration_id
+      AND r.academic_year = v_year
+      AND (v_scope = 'academic_year' OR r.semester = v_semester)
+    FOR UPDATE;
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object('success', false, 'code', 'NOT_FOUND', 'message', 'ไม่พบรายการลงทะเบียนในรอบปัจจุบัน');
+    END IF;
+
+    IF p_registration_token IS NOT NULL AND v_reg.registration_token = p_registration_token THEN
+        NULL;
+    ELSIF v_student_id IS NOT NULL THEN
+        IF v_reg.student_id IS DISTINCT FROM v_student_id
+           OR lower(btrim(v_reg.first_name)) IS DISTINCT FROM lower(v_first_name)
+           OR lower(btrim(v_reg.last_name)) IS DISTINCT FROM lower(v_last_name)
+           OR lower(btrim(v_reg.level)) IS DISTINCT FROM lower(v_level) THEN
+            RETURN jsonb_build_object('success', false, 'code', 'FORBIDDEN', 'message', 'ข้อมูลนักเรียนไม่ตรงกับรายการลงทะเบียนนี้');
+        END IF;
+    ELSE
+        IF v_reference IS NULL OR v_first_name IS NULL OR v_last_name IS NULL OR v_level IS NULL THEN
+            RETURN jsonb_build_object('success', false, 'code', 'INVALID_INPUT', 'message', 'ข้อมูลยืนยันตัวตนไม่ครบถ้วน');
+        END IF;
+        IF v_reference ~* '^TMP-' THEN
+            v_reference := upper(v_reference);
+        END IF;
+        SELECT secret INTO v_secret FROM private.registration_secrets WHERE name = 'pending_phone_hmac';
+        v_reference_hash := encode(hmac(
+            convert_to(v_reference || ':' || lower(v_first_name) || ':' || lower(v_last_name) || ':' || lower(v_level), 'UTF8'),
+            v_secret,
+            'sha256'
+        ), 'hex');
+        IF v_reg.pending_contact_hash IS DISTINCT FROM v_reference_hash THEN
+            RETURN jsonb_build_object('success', false, 'code', 'FORBIDDEN', 'message', 'ข้อมูลอ้างอิงไม่ตรงกับรายการลงทะเบียนนี้');
+        END IF;
+    END IF;
+
+    PERFORM 1 FROM clubs WHERE id = v_reg.club_id FOR UPDATE;
+    DELETE FROM registrations WHERE id = v_reg.id;
+    UPDATE clubs
+    SET enrolled_count = GREATEST(enrolled_count - 1, 0)
+    WHERE id = v_reg.club_id;
+
+    INSERT INTO audit_logs (student_id, student_name, action, club_name, ip_address, user_agent, details)
+    VALUES (v_reg.student_id, concat_ws('', v_reg.prefix, v_reg.first_name, ' ', v_reg.last_name),
+            'STUDENT_REGISTRATION_CANCELLED', v_reg.club_name,
+            left(COALESCE(p_ip_address, 'Unknown IP'), 128),
+            left(COALESCE(p_user_agent, 'Unknown Device'), 500),
+            'registration_id=' || v_reg.id || '; scope=' || v_scope);
+
+    RETURN jsonb_build_object('success', true, 'club_id', v_reg.club_id, 'registration_id', v_reg.id);
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION admin_upsert_registration(
     p_registration_id UUID,
     p_club_id UUID,
@@ -1218,9 +1331,11 @@ $$;
 
 REVOKE ALL ON FUNCTION admin_approve_registration(UUID, TEXT, TEXT, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION admin_delete_registration(UUID, TEXT, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION student_cancel_registration(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, UUID, TEXT, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION admin_upsert_registration(UUID, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BOOLEAN, TEXT, TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION admin_approve_registration(UUID, TEXT, TEXT, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION admin_delete_registration(UUID, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION student_cancel_registration(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, UUID, TEXT, TEXT) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION admin_upsert_registration(UUID, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BOOLEAN, TEXT, TEXT) TO authenticated;
 
 -- Replace the bootstrap policies. Public clients can read clubs and call the
