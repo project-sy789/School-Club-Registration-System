@@ -46,7 +46,10 @@ let state = {
     isAdminLoggedIn: false,
     activeTab: 'home',
     activeAdminSubTab: 'stats',
-    myGradesFilterOnly: false
+    myGradesFilterOnly: false,
+    myRegistrationsLoading: false,
+    myRegistrationsIdentity: null,
+    myRegistrationsRequestId: 0
 };
 
 // 🏁 App Initialization on Page Load
@@ -668,9 +671,12 @@ async function quickVerifyStudent() {
 
             showToast(`ยินดีต้อนรับคุณ ${data.prefix || ""}${data.first_name} ${data.last_name} (${data.level})! ระบบคัดกรองระดับชั้น ${levelPrefix} ให้โดยอัตโนมัติแล้ว`, "success");
 
+            // Link a reservation made as a new student to the verified school ID.
+            await claimPendingRegistrationsForStudent(data.student_id);
+
             // รีเรนเดอร์บอร์ดแสดงรายชื่อชุมนุมใหม่
             renderClubsGrid();
-            renderMyRegistrations();
+            await renderMyRegistrations();
         } else {
             showToast("ไม่พบรหัสประจำตัว กรุณาตรวจสอบอีกครั้ง หรือคลิกปุ่มนักเรียนใหม่ด้านล่างเพื่อเตรียมความพร้อม", "warning");
             state.currentStudentInfo = null;
@@ -866,6 +872,8 @@ window.updateQuickVerifyUI = updateQuickVerifyUI;
 async function renderMyRegistrations() {
     const card = document.getElementById("my-registrations-card");
     const info = state.currentStudentInfo;
+    const identity = info?.student_id && !info.is_pending_reference ? String(info.student_id).trim() : null;
+    const requestId = ++state.myRegistrationsRequestId;
     let savedTokens = [];
     try {
         savedTokens = JSON.parse(localStorage.getItem(REGISTRATION_TOKENS_KEY) || "[]");
@@ -873,8 +881,13 @@ async function renderMyRegistrations() {
         savedTokens = [];
     }
 
+    state.myRegistrations = [];
+    state.myRegistrationsLoading = Boolean(info || savedTokens.length > 0);
+    state.myRegistrationsIdentity = identity;
+
     if (!info && savedTokens.length === 0) {
-        state.myRegistrations = [];
+        state.myRegistrationsLoading = false;
+        state.myRegistrationsIdentity = null;
         if (card) {
             card.style.display = "none";
             card.innerHTML = "";
@@ -884,24 +897,57 @@ async function renderMyRegistrations() {
     }
 
     if (!supabaseClient) {
+        state.myRegistrationsLoading = false;
         if (card) card.style.display = "none";
         return;
     }
 
     try {
-        const { data: rows, error } = await supabaseClient.rpc("get_my_registrations", {
+        const tokenRequest = supabaseClient.rpc("get_my_registrations", {
             p_registration_tokens: savedTokens
         });
-        if (error) throw error;
+        const requests = [tokenRequest];
+        if (identity) {
+            requests.push(supabaseClient.rpc("get_my_registrations_by_student", {
+                p_student_id: identity
+            }));
+        }
+        const responses = await Promise.all(requests);
+        const tokenResponse = responses[0];
+        if (tokenResponse.error) throw tokenResponse.error;
 
-        const data = (rows || []).map(reg => ({
+        let rows = tokenResponse.data || [];
+        const studentResponse = responses[1];
+        if (studentResponse && !studentResponse.error) {
+            rows = [...rows, ...(studentResponse.data || [])];
+        } else if (studentResponse?.error) {
+            // Older databases can still use browser tokens until migration runs.
+            console.warn("Student registration lookup is unavailable; using saved tokens.", studentResponse.error);
+            if (studentResponse.error.code === "42883" || studentResponse.error.code === "PGRST202") {
+                showToast("ฐานข้อมูลยังไม่รองรับการค้นหารายการด้วยรหัสนักเรียน กรุณาให้ผู้ดูแลรัน migration_backend_hardening.sql เวอร์ชันล่าสุด", "warning");
+            }
+        }
+
+        if (requestId !== state.myRegistrationsRequestId || info !== state.currentStudentInfo) return;
+
+        const expectedName = info
+            ? `${info.first_name || ""}|${info.last_name || ""}`.trim().toLocaleLowerCase()
+            : null;
+        rows = rows.filter(reg => {
+            if (!info) return true;
+            if (identity && String(reg.student_id || "").trim() === identity) return true;
+            const registrationName = `${reg.first_name || ""}|${reg.last_name || ""}`.trim().toLocaleLowerCase();
+            return Boolean(expectedName && registrationName === expectedName);
+        });
+
+        const data = [...new Map((rows || []).map(reg => [reg.id, {
             ...reg,
             clubs: {
                 name: reg.club_name,
                 teacher: reg.teacher,
                 location: reg.location
             }
-        }));
+        }])).values()];
 
         const currentData = (data || []).filter(isRegistrationForCurrentScope);
         state.myRegistrations = currentData;
@@ -911,6 +957,7 @@ async function renderMyRegistrations() {
                 card.style.display = "none";
                 card.innerHTML = "";
             }
+            state.myRegistrationsLoading = false;
             renderClubsGrid();
             return;
         }
@@ -949,10 +996,13 @@ async function renderMyRegistrations() {
             card.style.display = "block";
         }
 
+        state.myRegistrationsLoading = false;
         renderClubsGrid();
     } catch (e) {
         console.warn("Failed to load my registrations:", e);
+        if (requestId !== state.myRegistrationsRequestId || info !== state.currentStudentInfo) return;
         state.myRegistrations = [];
+        state.myRegistrationsLoading = false;
         if (card) {
             card.style.display = "none";
             card.innerHTML = "";
@@ -962,12 +1012,62 @@ async function renderMyRegistrations() {
 }
 window.renderMyRegistrations = renderMyRegistrations;
 
+// ผูกคำร้องนักเรียนใหม่ในเครื่องนี้เข้ากับรหัสนักเรียนจริงที่เพิ่งยืนยัน
+async function claimPendingRegistrationsForStudent(studentId) {
+    if (!supabaseClient || !studentId) return null;
+
+    let savedTokens = [];
+    try {
+        savedTokens = JSON.parse(localStorage.getItem(REGISTRATION_TOKENS_KEY) || "[]");
+    } catch (_error) {
+        savedTokens = [];
+    }
+    if (!Array.isArray(savedTokens) || savedTokens.length === 0) return null;
+
+    try {
+        const { data, error } = await supabaseClient.rpc("claim_pending_registrations_by_student", {
+            p_registration_tokens: savedTokens,
+            p_student_id: String(studentId).trim()
+        });
+        if (error) {
+            // Keep compatibility with databases that have not received the migration yet.
+            if (error.code === "42883" || error.code === "PGRST202") {
+                console.warn("Pending registration claim RPC is unavailable; admin approval is still required.", error);
+                return null;
+            }
+            throw error;
+        }
+        if (data?.linked_count > 0) {
+            showToast(`เชื่อมรายการจองเดิม ${data.linked_count} รายการเข้ากับรหัสนักเรียนแล้ว`, "success");
+        }
+        return data;
+    } catch (error) {
+        console.warn("Could not claim pending registrations:", error);
+        return null;
+    }
+}
+window.claimPendingRegistrationsForStudent = claimPendingRegistrationsForStudent;
+
 // =====================================================================
 // 📝 5. STUDENT REGISTRATION FLOW (ATOMIC & CONCURRENCY SAFE)
 // =====================================================================
 function openRegistrationModal(clubId) {
     const club = state.clubs.find(c => c.id === clubId);
     if (!club) return;
+
+    if (state.myRegistrationsLoading) {
+        showToast("กำลังตรวจสอบรายการลงทะเบียนเดิม กรุณารอสักครู่แล้วลองใหม่", "info");
+        return;
+    }
+
+    const existingRegistration = state.currentStudentInfo
+        ? (state.myRegistrations || []).find(isRegistrationForCurrentScope)
+        : null;
+    if (existingRegistration) {
+        showToast(`คุณลงทะเบียน "${existingRegistration.clubs?.name || "ชุมนุมนี้"}" ในรอบนี้แล้ว`, "info");
+        renderMyRegistrations();
+        return;
+    }
     
     state.currentClub = club;
     
@@ -1122,7 +1222,8 @@ async function verifyStudentID() {
             
             // อัปเดตส่วนคัดกรองหน้าแรกด้วย
             updateQuickVerifyUI();
-            renderMyRegistrations();
+            await claimPendingRegistrationsForStudent(data.student_id);
+            await renderMyRegistrations();
             document.getElementById("submit-registration-btn").style.display = "flex";
         } else {
             // 🔵 เคสที่ 2: ไม่พบรายชื่อ (นักเรียนใหม่ / ย้ายคลาส) -> เปิดให้กรอกเอง

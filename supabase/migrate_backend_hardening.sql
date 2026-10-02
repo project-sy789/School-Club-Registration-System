@@ -361,6 +361,138 @@ $$;
 REVOKE ALL ON FUNCTION get_my_registrations(UUID[]) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION get_my_registrations(UUID[]) TO anon, authenticated;
 
+-- A verified student can recover their current registration on another device
+-- after entering the school ID. Pending students remain token-based because
+-- their temporary contact reference is intentionally stored only as a hash.
+CREATE OR REPLACE FUNCTION get_my_registrations_by_student(p_student_id TEXT)
+RETURNS TABLE (
+    id UUID,
+    registration_token UUID,
+    club_id UUID,
+    student_id TEXT,
+    prefix TEXT,
+    first_name TEXT,
+    last_name TEXT,
+    level TEXT,
+    registration_status TEXT,
+    academic_year TEXT,
+    semester TEXT,
+    created_at TIMESTAMPTZ,
+    club_name TEXT,
+    teacher TEXT,
+    location TEXT
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+    SELECT r.id, r.registration_token, r.club_id, r.student_id,
+           r.prefix, r.first_name, r.last_name, r.level,
+           r.registration_status, r.academic_year, r.semester, r.created_at,
+           c.name, c.teacher, c.location
+    FROM registrations r
+    JOIN clubs c ON c.id = r.club_id
+    CROSS JOIN LATERAL (
+        SELECT COALESCE(value->>'academic_year', '2569') AS academic_year,
+               COALESCE(value->>'semester', '1') AS semester,
+               CASE WHEN value->>'registration_scope' = 'academic_year'
+                    THEN 'academic_year' ELSE 'semester' END AS registration_scope
+        FROM settings
+        WHERE key = 'school_config'
+        LIMIT 1
+    ) cfg
+    WHERE r.student_id = NULLIF(btrim(p_student_id), '')
+      AND r.academic_year = cfg.academic_year
+      AND (cfg.registration_scope = 'academic_year' OR r.semester = cfg.semester);
+$$;
+
+REVOKE ALL ON FUNCTION get_my_registrations_by_student(TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION get_my_registrations_by_student(TEXT) TO anon, authenticated;
+
+-- When a new student later receives a real school ID, link reservations made
+-- in the same browser instead of leaving a duplicate pending row behind.
+CREATE OR REPLACE FUNCTION claim_pending_registrations_by_student(
+    p_registration_tokens UUID[],
+    p_student_id TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_student RECORD;
+    v_year TEXT;
+    v_semester TEXT;
+    v_scope TEXT;
+    v_student_id TEXT := NULLIF(btrim(p_student_id), '');
+    v_linked_count INTEGER := 0;
+BEGIN
+    IF v_student_id IS NULL OR COALESCE(array_length(p_registration_tokens, 1), 0) = 0 THEN
+        RETURN jsonb_build_object('success', true, 'linked_count', 0);
+    END IF;
+
+    SELECT student_id, prefix, first_name, last_name, level
+    INTO v_student
+    FROM students
+    WHERE student_id = v_student_id AND status = 'active';
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object('success', false, 'code', 'STUDENT_NOT_FOUND', 'linked_count', 0);
+    END IF;
+
+    SELECT COALESCE(value->>'academic_year', '2569'),
+           COALESCE(value->>'semester', '1'),
+           CASE WHEN value->>'registration_scope' = 'academic_year' THEN 'academic_year' ELSE 'semester' END
+    INTO v_year, v_semester, v_scope
+    FROM settings
+    WHERE key = 'school_config';
+
+    PERFORM pg_advisory_xact_lock(hashtextextended('registration-student:' || v_year || ':' || v_student_id, 0));
+    PERFORM pg_advisory_xact_lock(hashtextextended(
+        'registration-name:' || v_year || ':' || lower(btrim(v_student.first_name)) || ':' || lower(btrim(v_student.last_name)), 0));
+
+    -- If a verified registration already exists, leave the pending request for
+    -- an administrator to resolve rather than moving a second seat.
+    IF EXISTS (
+        SELECT 1 FROM registrations
+        WHERE student_id = v_student_id
+          AND academic_year = v_year
+          AND (v_scope = 'academic_year' OR semester = v_semester)
+    ) THEN
+        RETURN jsonb_build_object('success', false, 'code', 'ALREADY_REGISTERED', 'linked_count', 0);
+    END IF;
+
+    UPDATE registrations
+    SET student_id = v_student.student_id,
+        pending_contact_hash = NULL,
+        pending_contact_hint = NULL,
+        prefix = v_student.prefix,
+        first_name = v_student.first_name,
+        last_name = v_student.last_name,
+        level = v_student.level,
+        registration_status = 'verified'
+    WHERE registration_token = ANY(p_registration_tokens)
+      AND registration_status = 'pending'
+      AND student_id IS NULL
+      AND academic_year = v_year
+      AND (v_scope = 'academic_year' OR semester = v_semester)
+      AND lower(btrim(first_name)) = lower(btrim(v_student.first_name))
+      AND lower(btrim(last_name)) = lower(btrim(v_student.last_name));
+
+    GET DIAGNOSTICS v_linked_count = ROW_COUNT;
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'linked_count', v_linked_count,
+        'student_id', v_student.student_id
+    );
+END;
+$$;
+
+REVOKE ALL ON FUNCTION claim_pending_registrations_by_student(UUID[], TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION claim_pending_registrations_by_student(UUID[], TEXT) TO anon, authenticated;
+
 DROP FUNCTION IF EXISTS register_student_atomic(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT);
 
 CREATE OR REPLACE FUNCTION register_student_atomic(
