@@ -448,7 +448,7 @@ RETURNS TABLE (
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
-SET search_path = public, private, pg_temp
+SET search_path = public, extensions, private, pg_temp
 AS $$
     SELECT r.id, r.registration_token, r.club_id, r.student_id,
            r.prefix, r.first_name, r.last_name, r.level,
@@ -499,7 +499,7 @@ CREATE OR REPLACE FUNCTION claim_pending_registrations_by_student(
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, pg_temp
+SET search_path = public, extensions, pg_temp
 AS $$
 DECLARE
     v_student RECORD;
@@ -664,7 +664,7 @@ CREATE OR REPLACE FUNCTION register_student_atomic(
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, pg_temp
+SET search_path = public, extensions, private, pg_temp
 AS $$
 DECLARE
     v_club RECORD;
