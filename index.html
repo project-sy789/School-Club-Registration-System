@@ -248,6 +248,9 @@
                     <button class="admin-tab-btn" id="admin-menu-settings" onclick="switchAdminSubTab('settings')">
                         <i class="fa-solid fa-sliders"></i> ตั้งค่าเปิด-ปิดระบบ
                     </button>
+                    <button class="admin-tab-btn" id="admin-menu-admins" onclick="switchAdminSubTab('admins')">
+                        <i class="fa-solid fa-user-shield"></i> จัดการผู้ดูแล
+                    </button>
                     <button class="admin-tab-btn" id="admin-menu-logs" onclick="switchAdminSubTab('logs')">
                         <i class="fa-solid fa-list-check"></i> ตรวจสอบประวัติ (Audit Logs)
                     </button>
@@ -662,6 +665,45 @@
                                     </tbody>
                                 </table>
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- Sub-Tab: Admin accounts -->
+                    <div id="admin-sub-admins" class="admin-sub-view" style="display: none;">
+                        <div class="admin-content-header" style="margin-bottom: 1.5rem;">
+                            <div>
+                                <h3>จัดการผู้ดูแลระบบ</h3>
+                                <p style="color: var(--text-secondary); font-size: 0.9rem;">เพิ่มสิทธิ์ด้วยอีเมลของบัญชีที่มีอยู่ใน Supabase Auth และปิดสิทธิ์ผู้ดูแลได้จากหน้านี้</p>
+                            </div>
+                        </div>
+
+                        <div class="admin-card" style="margin-bottom: 1.5rem;">
+                            <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
+                                <div class="input-group" style="flex:1; min-width:240px;">
+                                    <label for="admin-add-email">อีเมลบัญชีผู้ดูแลคนใหม่</label>
+                                    <input type="email" id="admin-add-email" placeholder="teacher@school.ac.th" autocomplete="off" onkeypress="handleAddAdminKeyPress(event)">
+                                </div>
+                                <button class="btn-primary" id="admin-add-btn" onclick="addAdminUser()" style="height:48px;">
+                                    <i class="fa-solid fa-user-plus"></i> เพิ่มผู้ดูแล
+                                </button>
+                            </div>
+                            <p style="font-size:0.8rem; color:var(--text-secondary); margin:10px 0 0;">บัญชีอีเมลต้องถูกสร้างไว้ในเมนู Authentication ของโปรเจกต์ก่อน การเพิ่มสิทธิ์จะไม่เปิดเผยรหัสผ่านหรือ service key</p>
+                        </div>
+
+                        <div class="search-results-table-container" style="max-height:420px; overflow-y:auto;">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>อีเมล</th>
+                                        <th>สถานะ</th>
+                                        <th>เพิ่มเมื่อ</th>
+                                        <th>การจัดการ</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="admin-users-tbody">
+                                    <tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:2rem 0;">เลือกเมนูนี้เพื่อโหลดรายชื่อผู้ดูแล</td></tr>
+                                </tbody>
+                            </table>
                         </div>
                     </div>
 
@@ -1123,6 +1165,6 @@
     <!-- 💻 6. Javascript Logic Engine -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="config.js?v=1.1.2"></script>
-    <script src="app.js?v=1.2.7"></script>
+    <script src="app.js?v=1.2.8"></script>
 </body>
 </html>

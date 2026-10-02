@@ -94,6 +94,11 @@ CREATE INDEX IF NOT EXISTS registrations_current_student_idx
     ON registrations(student_id, academic_year, semester)
     WHERE student_id IS NOT NULL;
 
+-- Used by the registration RPC and admin reports when counting a club's
+-- registrations for the active academic period.
+CREATE INDEX IF NOT EXISTS registrations_club_term_idx
+    ON registrations(club_id, academic_year, semester);
+
 CREATE UNIQUE INDEX IF NOT EXISTS registrations_one_student_per_term_uidx
     ON registrations(student_id, academic_year, semester)
     WHERE student_id IS NOT NULL;
@@ -137,6 +142,121 @@ $$;
 
 REVOKE ALL ON FUNCTION is_admin() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION is_admin() TO authenticated;
+
+-- Admins can manage other admin accounts from the dashboard without exposing
+-- auth.users or requiring a service_role key in the browser. The invited email
+-- must already have a Supabase Auth account; only the first bootstrap admin
+-- still needs to be inserted once during initial setup.
+CREATE OR REPLACE FUNCTION admin_list_users()
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_users JSONB;
+BEGIN
+    IF NOT is_admin() THEN
+        RETURN jsonb_build_object('success', false, 'code', 'FORBIDDEN', 'message', 'ไม่มีสิทธิ์ผู้ดูแลระบบ');
+    END IF;
+
+    SELECT COALESCE(jsonb_agg(
+        jsonb_build_object(
+            'user_id', au.user_id,
+            'email', COALESCE(u.email, ''),
+            'enabled', au.enabled,
+            'created_at', au.created_at,
+            'is_current_user', au.user_id = auth.uid()
+        ) ORDER BY au.created_at
+    ), '[]'::jsonb)
+    INTO v_users
+    FROM admin_users au
+    LEFT JOIN auth.users u ON u.id = au.user_id;
+
+    RETURN jsonb_build_object('success', true, 'users', v_users);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION admin_add_user_by_email(p_email TEXT)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_email TEXT := lower(btrim(p_email));
+    v_user RECORD;
+BEGIN
+    IF NOT is_admin() THEN
+        RETURN jsonb_build_object('success', false, 'code', 'FORBIDDEN', 'message', 'ไม่มีสิทธิ์ผู้ดูแลระบบ');
+    END IF;
+    IF v_email IS NULL OR v_email = '' OR v_email !~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$' THEN
+        RETURN jsonb_build_object('success', false, 'code', 'INVALID_EMAIL', 'message', 'กรุณากรอกอีเมลให้ถูกต้อง');
+    END IF;
+
+    SELECT id, email INTO v_user
+    FROM auth.users
+    WHERE lower(email) = v_email
+    LIMIT 1;
+
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'code', 'AUTH_USER_NOT_FOUND',
+            'message', 'ไม่พบบัญชีอีเมลนี้ใน Supabase Auth กรุณาสร้างบัญชีในระบบ Auth ก่อน แล้วจึงเพิ่มสิทธิ์ผู้ดูแล'
+        );
+    END IF;
+
+    INSERT INTO admin_users (user_id, role, enabled)
+    VALUES (v_user.id, 'admin', true)
+    ON CONFLICT (user_id) DO UPDATE SET enabled = true, role = 'admin';
+
+    INSERT INTO audit_logs (action, details)
+    VALUES ('ADMIN_GRANTED', 'เพิ่มผู้ดูแลระบบ: ' || v_email);
+
+    RETURN jsonb_build_object('success', true, 'user_id', v_user.id, 'email', v_email, 'enabled', true);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION admin_set_user_enabled(p_user_id UUID, p_enabled BOOLEAN)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_email TEXT;
+BEGIN
+    IF NOT is_admin() THEN
+        RETURN jsonb_build_object('success', false, 'code', 'FORBIDDEN', 'message', 'ไม่มีสิทธิ์ผู้ดูแลระบบ');
+    END IF;
+    IF p_user_id IS NULL THEN
+        RETURN jsonb_build_object('success', false, 'code', 'INVALID_INPUT', 'message', 'ไม่พบผู้ดูแลที่ต้องการแก้ไข');
+    END IF;
+    IF p_user_id = auth.uid() AND NOT p_enabled THEN
+        RETURN jsonb_build_object('success', false, 'code', 'SELF_DISABLE', 'message', 'ไม่สามารถปิดสิทธิ์บัญชีที่กำลังใช้งานอยู่ได้');
+    END IF;
+
+    SELECT email INTO v_email FROM auth.users WHERE id = p_user_id;
+    UPDATE admin_users SET enabled = p_enabled WHERE user_id = p_user_id;
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object('success', false, 'code', 'NOT_FOUND', 'message', 'ไม่พบผู้ดูแลที่ต้องการแก้ไข');
+    END IF;
+
+    INSERT INTO audit_logs (action, details)
+    VALUES (CASE WHEN p_enabled THEN 'ADMIN_ENABLED' ELSE 'ADMIN_DISABLED' END,
+            CASE WHEN p_enabled THEN 'เปิดสิทธิ์ผู้ดูแล: ' ELSE 'ปิดสิทธิ์ผู้ดูแล: ' END || COALESCE(v_email, p_user_id::TEXT));
+
+    RETURN jsonb_build_object('success', true, 'user_id', p_user_id, 'email', v_email, 'enabled', p_enabled);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION admin_list_users() FROM PUBLIC;
+REVOKE ALL ON FUNCTION admin_add_user_by_email(TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION admin_set_user_enabled(UUID, BOOLEAN) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION admin_list_users() TO authenticated;
+GRANT EXECUTE ON FUNCTION admin_add_user_by_email(TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION admin_set_user_enabled(UUID, BOOLEAN) TO authenticated;
 
 -- Public settings deliberately omit admin credentials.
 CREATE OR REPLACE FUNCTION get_public_settings()
@@ -266,7 +386,6 @@ DECLARE
     v_year TEXT;
     v_semester TEXT;
     v_scope TEXT;
-    v_current_enrolled INTEGER;
     v_is_active BOOLEAN;
     v_start_time TIMESTAMPTZ;
     v_end_time TIMESTAMPTZ;
@@ -333,14 +452,6 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'code', 'CLUB_NOT_FOUND', 'message', 'ไม่พบชุมนุมที่เลือก');
     END IF;
 
-    -- Reconcile the cached counter when annual mode is enabled. This also
-    -- makes switching from semester mode safe without a manual recount.
-    IF v_scope = 'academic_year' THEN
-        SELECT COUNT(*) INTO v_current_enrolled
-        FROM registrations
-        WHERE club_id = v_club.id AND academic_year = v_year;
-    END IF;
-
     -- A retry may have been waiting on the club lock while the original
     -- request committed. Re-read the key after serialization so it returns
     -- the original result instead of being rejected as a full club.
@@ -359,7 +470,7 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'code', 'GRADE_NOT_ALLOWED', 'message', 'ชุมนุมนี้ไม่เปิดรับระดับชั้นของคุณ');
     END IF;
 
-    IF COALESCE(v_current_enrolled, v_club.enrolled_count) >= v_club.capacity THEN
+    IF COALESCE(v_club.enrolled_count, 0) >= v_club.capacity THEN
         RETURN jsonb_build_object('success', false, 'code', 'CLUB_FULL', 'message', 'ชุมนุม "' || v_club.name || '" เต็มโควตาแล้ว');
     END IF;
 
@@ -497,14 +608,11 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'code', 'ALREADY_REGISTERED', 'message', 'นักเรียนคนนี้ลงทะเบียนในเทอมนี้แล้ว');
     END;
 
-    UPDATE clubs c
-    SET enrolled_count = (
-        SELECT COUNT(*) FROM registrations r
-        WHERE r.club_id = c.id
-          AND r.academic_year = v_year
-          AND (v_scope = 'academic_year' OR r.semester = v_semester)
-    )
-    WHERE c.id = v_club.id;
+    -- The club row is already locked above, so incrementing the cached value
+    -- is constant-time and serializes first-come-first-served requests.
+    UPDATE clubs
+    SET enrolled_count = enrolled_count + 1
+    WHERE id = v_club.id;
 
     INSERT INTO audit_logs (student_id, student_name, action, club_name, ip_address, user_agent, details)
     VALUES (

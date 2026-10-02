@@ -10,6 +10,15 @@ function isPendingReference(value) {
     return /^0\d{9}$/.test(value) || /^TMP-[A-Z0-9]{6,32}$/i.test(value);
 }
 
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
 function getRegistrationRequestKey(identity) {
     const keyName = `school-club-request:${identity}`;
     let requestKey = sessionStorage.getItem(keyName);
@@ -25,6 +34,7 @@ let state = {
     clubs: [],
     students: [],
     registrations: [],
+    adminUsers: [],
     auditLogs: [], // เก็บประวัติความปลอดภัยระบบ
     settings: {
         school_config: { school_name: "ระบบลงทะเบียนชุมนุม", semester: "1", academic_year: "2569", registration_scope: "semester" },
@@ -1648,11 +1658,116 @@ function switchAdminSubTab(subTabId) {
     loadAdminDashboardData();
 }
 
+async function loadAdminUsers() {
+    const tbody = document.getElementById("admin-users-tbody");
+    if (!tbody) return;
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:2rem 0;"><i class="fa-solid fa-circle-notch fa-spin"></i> กำลังโหลดรายชื่อผู้ดูแล...</td></tr>`;
+
+    const { data, error } = await supabaseClient.rpc("admin_list_users");
+    if (error) throw error;
+    if (!data || data.success === false) throw new Error(data?.message || "ไม่สามารถโหลดรายชื่อผู้ดูแลได้");
+
+    state.adminUsers = Array.isArray(data.users) ? data.users : [];
+    renderAdminUsers();
+}
+
+function renderAdminUsers() {
+    const tbody = document.getElementById("admin-users-tbody");
+    if (!tbody) return;
+    tbody.innerHTML = "";
+
+    if (state.adminUsers.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:2rem 0;">ยังไม่มีผู้ดูแลระบบ</td></tr>`;
+        return;
+    }
+
+    state.adminUsers.forEach(user => {
+        const row = document.createElement("tr");
+        const email = escapeHtml(user.email || "ไม่พบอีเมล");
+        const createdAt = user.created_at
+            ? new Date(user.created_at).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" })
+            : "-";
+        const statusText = user.enabled ? "เปิดใช้งาน" : "ปิดสิทธิ์";
+        const statusColor = user.enabled ? "var(--accent-mint)" : "#fca5a5";
+        const actionLabel = user.enabled ? "ปิดสิทธิ์" : "เปิดสิทธิ์";
+        const actionIcon = user.enabled ? "fa-user-slash" : "fa-user-check";
+        row.innerHTML = `
+            <td><strong>${email}</strong>${user.is_current_user ? ' <span style="font-size:0.75rem; color:var(--accent-mint);">(บัญชีของคุณ)</span>' : ""}</td>
+            <td><span style="color:${statusColor}; font-weight:600;">${statusText}</span></td>
+            <td style="font-size:0.85rem; color:var(--text-secondary);">${createdAt}</td>
+            <td>
+                <button class="btn-secondary" ${user.is_current_user ? "disabled title=\"บัญชีที่กำลังใช้งานไม่สามารถปิดสิทธิ์ตัวเองได้\"" : ""}
+                        onclick="toggleAdminUser('${user.user_id}', ${!user.enabled})"
+                        style="padding:7px 12px; font-size:0.8rem;">
+                    <i class="fa-solid ${actionIcon}"></i> ${actionLabel}
+                </button>
+            </td>`;
+        tbody.appendChild(row);
+    });
+}
+
+function handleAddAdminKeyPress(event) {
+    if (event.key === "Enter") addAdminUser();
+}
+
+async function addAdminUser() {
+    const input = document.getElementById("admin-add-email");
+    const button = document.getElementById("admin-add-btn");
+    const email = (input?.value || "").trim();
+    if (!email) {
+        showToast("กรุณากรอกอีเมลผู้ดูแล", "warning");
+        return;
+    }
+
+    button.disabled = true;
+    try {
+        const { data, error } = await supabaseClient.rpc("admin_add_user_by_email", { p_email: email });
+        if (error) throw error;
+        if (!data?.success) throw new Error(data?.message || "เพิ่มผู้ดูแลไม่สำเร็จ");
+        input.value = "";
+        showToast(`เพิ่ม ${data.email} เป็นผู้ดูแลแล้ว`, "success");
+        await loadAdminUsers();
+    } catch (e) {
+        console.error("Error adding admin user:", e);
+        showToast(e.message || "เพิ่มผู้ดูแลไม่สำเร็จ", "error");
+    } finally {
+        button.disabled = false;
+    }
+}
+
+async function toggleAdminUser(userId, enabled) {
+    const user = state.adminUsers.find(item => item.user_id === userId);
+    const email = user?.email || "บัญชีนี้";
+    const action = enabled ? "เปิดสิทธิ์" : "ปิดสิทธิ์";
+    if (!confirm(`ยืนยัน${action}ผู้ดูแล ${email || "บัญชีนี้"} หรือไม่?`)) return;
+    try {
+        const { data, error } = await supabaseClient.rpc("admin_set_user_enabled", {
+            p_user_id: userId,
+            p_enabled: enabled
+        });
+        if (error) throw error;
+        if (!data?.success) throw new Error(data?.message || `${action}ไม่สำเร็จ`);
+        showToast(`${action}เรียบร้อยแล้ว`, "success");
+        await loadAdminUsers();
+    } catch (e) {
+        console.error("Error changing admin user:", e);
+        showToast(e.message || `${action}ไม่สำเร็จ`, "error");
+    }
+}
+
+window.addAdminUser = addAdminUser;
+window.handleAddAdminKeyPress = handleAddAdminKeyPress;
+window.toggleAdminUser = toggleAdminUser;
+
 // โหลดข้อมูลรายงานและตารางสิทธิ์ต่างๆ ทั้งหมดมาเก็บไว้ที่ State
 async function loadAdminDashboardData() {
     if (!supabaseClient || !state.isAdminLoggedIn) return;
 
     try {
+        if (state.activeAdminSubTab === 'admins') {
+            await loadAdminUsers();
+            return;
+        }
         const { academic_year, semester } = getCurrentTerm();
         // ดึงรายการตามขอบเขตที่โรงเรียนเลือก: ทั้งปีหรือเฉพาะภาคเรียน
         let regsQuery = supabaseClient

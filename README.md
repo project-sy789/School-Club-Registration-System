@@ -43,7 +43,7 @@
 > 2. **สมัคร Supabase** (ฟรี) → รัน [`supabase/setup_database.sql`](supabase/setup_database.sql) แล้วรัน [`supabase/migrate_backend_hardening.sql`](supabase/migrate_backend_hardening.sql) ใน SQL Editor → คัดลอก **Project URL + anon Key** เก็บไว้
 > 3. ที่ Fork ของคุณบน GitHub → เปิดไฟล์ **`config.js`** → กดรูป **ดินสอ ✏️** มุมขวาบน → นำ URL และ Key มาวางในเครื่องหมาย `""` ของตัวแปร `SUPABASE_CONFIG` → กด **Commit changes** ✅
 > 4. ไปแท็บ **Settings → Pages → Source: Deploy from a branch → เลือก `main` → Save** ✅
-> 5. สร้างผู้ใช้ผู้ดูแลใน Supabase Auth และเพิ่ม `user_id` ลงตาราง `admin_users` ตามคู่มือด้านล่าง → เปิดลิงก์ GitHub Pages และเข้าสู่หลังบ้านด้วยอีเมล/รหัสผ่านของผู้ดูแล
+> 5. สร้างบัญชีผู้ดูแลคนแรกใน Supabase Auth และ bootstrap สิทธิ์ครั้งเดียวตามคู่มือด้านล่าง → หลังจากเข้าสู่หลังบ้านแล้ว สามารถเพิ่ม/ปิดสิทธิ์ผู้ดูแลคนอื่นจากเมนู **จัดการผู้ดูแล** ได้โดยไม่ต้องเข้า SQL Editor ซ้ำ
 >
 > *ทำเสร็จภายใน 5 นาทีโดยไม่ต้องติดตั้งโปรแกรมหรือเขียนโค้ดเอง!* 💚
 
@@ -113,8 +113,8 @@
 
 ## 🔒 ตั้งค่าผู้ดูแลระบบ (Supabase Auth)
 
-1. ไปที่ Supabase **Authentication → Users → Add user** และสร้างบัญชีอีเมล/รหัสผ่านของครูผู้ดูแล โดยเลือก **Auto Confirm User** ถ้ามีตัวเลือกนี้ หรือเปิดลิงก์ยืนยันอีเมลให้เรียบร้อยก่อนล็อกอิน
-2. ไปที่ **SQL Editor** ของ Supabase โปรเจกต์เดียวกับเว็บไซต์ แล้วรันคำสั่งนี้ โดยเปลี่ยนเฉพาะอีเมล:
+1. ไปที่ Supabase **Authentication → Users → Add user** และสร้างบัญชีอีเมล/รหัสผ่านของผู้ดูแลคนแรก โดยเลือก **Auto Confirm User** ถ้ามีตัวเลือกนี้ หรือเปิดลิงก์ยืนยันอีเมลให้เรียบร้อยก่อนล็อกอิน
+2. การเพิ่มผู้ดูแลคนแรกต้องทำครั้งเดียวใน **SQL Editor** เพราะหน้าเว็บไม่ควรถือ `service_role` key และไม่ควรเปิดให้บุคคลทั่วไปสร้างสิทธิ์ผู้ดูแลเอง รันคำสั่งนี้โดยเปลี่ยนเฉพาะอีเมล:
 
 ```sql
 insert into public.admin_users (user_id, role, enabled)
@@ -126,7 +126,8 @@ do update set role = 'admin', enabled = true;
 ```
 
 3. ปิดการสมัครสมาชิกสาธารณะใน **Authentication → Providers → Email** เพื่อไม่ให้บุคคลทั่วไปสร้างบัญชีเอง
-4. ตรวจสอบว่าเพิ่ม UID ถูกคนด้วยคำสั่งนี้:
+4. เข้าสู่หน้าเว็บด้วยบัญชีคนแรก แล้วไปที่หลังบ้าน → **จัดการผู้ดูแล** จากนั้นกรอกอีเมลของบัญชี Auth ที่ต้องการเพิ่ม ระบบจะเปิดสิทธิ์ให้และแสดงรายการในตาราง
+5. ตรวจสอบว่าเพิ่ม UID ถูกคนด้วยคำสั่งนี้:
 
 ```sql
 select au.user_id, au.role, au.enabled, u.email
@@ -134,7 +135,7 @@ from public.admin_users au
 join auth.users u on u.id = au.user_id;
 ```
 
-5. หลัง migration แล้ว ผู้ใช้ anonymous จะอ่านตารางนักเรียน/ผู้สมัครไม่ได้ หน้าแอดมินจะใช้ Supabase Auth และตรวจสิทธิ์จาก `admin_users` หากเว็บแจ้งว่าไม่มีฟังก์ชันสิทธิ์ผู้ดูแล ให้รัน `supabase/migrate_backend_hardening.sql` ก่อน
+6. หลัง migration แล้ว ผู้ใช้ anonymous จะอ่านตารางนักเรียน/ผู้สมัครไม่ได้ หน้าแอดมินจะใช้ Supabase Auth และตรวจสิทธิ์จาก `admin_users` หากเว็บแจ้งว่าไม่มีฟังก์ชันจัดการผู้ดูแล ให้รัน `supabase/migrate_backend_hardening.sql` เวอร์ชันล่าสุดก่อน
 
 รหัสบัตรประชาชนไม่ควรถูกใช้เป็นตัวระบุสำรอง ระบบรับเฉพาะเบอร์โทรศัพท์ผู้ปกครอง 10 หลักที่ขึ้นต้นด้วย 0 หรือรหัสสมัครชั่วคราวรูปแบบ `TMP-XXXXXX` สำหรับรายการ Pending และเก็บค่าดังกล่าวในรูป hash กับเลขท้าย 4 หลักเท่านั้น
 

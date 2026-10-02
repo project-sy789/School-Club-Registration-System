@@ -94,6 +94,8 @@ CREATE TABLE registrations (
 );
 
 CREATE INDEX IF NOT EXISTS idx_registrations_term ON registrations(academic_year, semester);
+CREATE INDEX IF NOT EXISTS registrations_club_term_idx
+    ON registrations(club_id, academic_year, semester);
 
 -- เปิดใช้งาน RLS สำหรับ Registrations
 ALTER TABLE registrations ENABLE ROW LEVEL SECURITY;
