@@ -3174,6 +3174,21 @@ async function saveSystemSettings() {
     };
 
     try {
+        const isMissingReconcileFunction = (error) => error
+            && (error.code === "42883" || error.code === "PGRST202");
+
+        // Annual mode must be backed by the hardened RPCs before it can be
+        // enabled; otherwise old databases would accept the setting but still
+        // allow duplicate registrations in the next semester.
+        if (registrationScope === "academic_year") {
+            const { error: migrationCheckError } = await supabaseClient.rpc("admin_reconcile_club_counts");
+            if (isMissingReconcileFunction(migrationCheckError)) {
+                showToast("ยังเปิดโหมดรายปีไม่ได้ กรุณารัน supabase/migrate_backend_hardening.sql เวอร์ชันล่าสุดใน SQL Editor ก่อน", "warning");
+                return;
+            }
+            if (migrationCheckError) throw migrationCheckError;
+        }
+
         // อัปเดตข้อมูลลง Supabase แบบขนาน
         const updateConf = supabaseClient.from("settings").update({ value: payloadConfig }).eq("key", "school_config");
         const updatePeriod = supabaseClient.from("settings").update({ value: payloadPeriod }).eq("key", "registration_period");
@@ -3184,9 +3199,11 @@ async function saveSystemSettings() {
         if (res2.error) throw res2.error;
 
         const { data: reconcileResult, error: reconcileError } = await supabaseClient.rpc("admin_reconcile_club_counts");
-        const reconcileFunctionMissing = reconcileError
-            && (reconcileError.code === "42883" || reconcileError.code === "PGRST202");
+        const reconcileFunctionMissing = isMissingReconcileFunction(reconcileError);
         if (reconcileError && !reconcileFunctionMissing) throw reconcileError;
+        if (reconcileFunctionMissing && registrationScope === "academic_year") {
+            throw new Error("ฐานข้อมูลยังไม่ได้ติดตั้ง migration สำหรับโหมดรายปี");
+        }
         if (reconcileResult && reconcileResult.success === false) {
             throw new Error(reconcileResult.message || "ไม่สามารถคำนวณจำนวนที่นั่งใหม่ได้");
         }
