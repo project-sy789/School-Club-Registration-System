@@ -24,6 +24,7 @@ INSERT INTO settings (key, value) VALUES
     "school_name": "โรงเรียนมัธยมศึกษารวมวิทยายน",
     "academic_year": "2569",
     "semester": "1",
+    "registration_scope": "semester",
     "logo_base64": null
 }'::jsonb),
 ('registration_period', '{
@@ -149,14 +150,16 @@ DECLARE
     v_student_id_cleaned TEXT;
     v_current_year TEXT;
     v_current_sem TEXT;
+    v_scope TEXT;
 BEGIN
     v_student_id_cleaned := NULLIF(TRIM(p_student_id), '');
 
     -- โหลดเทอมปัจจุบันจาก school_config
     SELECT
         COALESCE(value->>'academic_year', '2569'),
-        COALESCE(value->>'semester', '1')
-    INTO v_current_year, v_current_sem
+        COALESCE(value->>'semester', '1'),
+        CASE WHEN value->>'registration_scope' = 'academic_year' THEN 'academic_year' ELSE 'semester' END
+    INTO v_current_year, v_current_sem, v_scope
     FROM settings
     WHERE key = 'school_config';
 
@@ -187,7 +190,7 @@ BEGIN
             SELECT 1 FROM registrations
             WHERE student_id = v_student_id_cleaned
               AND academic_year = v_current_year
-              AND semester = v_current_sem
+              AND (v_scope = 'academic_year' OR semester = v_current_sem)
         ) INTO v_already_registered;
 
         IF v_already_registered THEN
@@ -200,7 +203,7 @@ BEGIN
         WHERE TRIM(first_name) = TRIM(p_first_name)
           AND TRIM(last_name) = TRIM(p_last_name)
           AND academic_year = v_current_year
-          AND semester = v_current_sem
+          AND (v_scope = 'academic_year' OR semester = v_current_sem)
           AND (
               student_id IS NULL
               OR v_student_id_cleaned IS NULL
@@ -221,6 +224,12 @@ BEGIN
 
     IF v_capacity IS NULL THEN
         RETURN jsonb_build_object('success', false, 'message', 'ไม่พบชุมนุมที่คุณเลือกในระบบ');
+    END IF;
+
+    IF v_scope = 'academic_year' THEN
+        SELECT COUNT(*) INTO v_enrolled
+        FROM registrations
+        WHERE club_id = p_club_id AND academic_year = v_current_year;
     END IF;
 
     IF v_enrolled >= v_capacity THEN
@@ -244,7 +253,14 @@ BEGIN
     VALUES (p_club_id, v_student_id_cleaned, TRIM(p_prefix), TRIM(p_first_name), TRIM(p_last_name), TRIM(p_level), v_status, v_current_year, v_current_sem)
     RETURNING id INTO v_registered_id;
 
-    UPDATE clubs SET enrolled_count = enrolled_count + 1 WHERE id = p_club_id;
+    UPDATE clubs c
+    SET enrolled_count = (
+        SELECT COUNT(*) FROM registrations r
+        WHERE r.club_id = c.id
+          AND r.academic_year = v_current_year
+          AND (v_scope = 'academic_year' OR r.semester = v_current_sem)
+    )
+    WHERE c.id = p_club_id;
 
     INSERT INTO audit_logs (student_id, student_name, action, club_name, ip_address, user_agent, details)
     VALUES (
@@ -320,11 +336,13 @@ DECLARE
     v_failed JSONB := '[]'::jsonb;
     v_current_year TEXT;
     v_current_sem TEXT;
+    v_scope TEXT;
 BEGIN
     SELECT
         COALESCE(value->>'academic_year', '2569'),
-        COALESCE(value->>'semester', '1')
-    INTO v_current_year, v_current_sem
+        COALESCE(value->>'semester', '1'),
+        CASE WHEN value->>'registration_scope' = 'academic_year' THEN 'academic_year' ELSE 'semester' END
+    INTO v_current_year, v_current_sem, v_scope
     FROM settings WHERE key = 'school_config';
 
     FOR v_row IN SELECT * FROM jsonb_array_elements(p_rows) LOOP
@@ -355,6 +373,12 @@ BEGIN
                 CONTINUE;
             END IF;
 
+            IF v_scope = 'academic_year' THEN
+                SELECT COUNT(*) INTO v_enrolled
+                FROM registrations
+                WHERE club_id = v_club_id AND academic_year = v_current_year;
+            END IF;
+
             -- เคารพโควตาที่นั่ง (ถ้าเต็ม → skip + รายงาน)
             IF v_enrolled >= v_capacity THEN
                 v_skipped := v_skipped || jsonb_build_object('row', v_row, 'reason', 'ชุมนุม "' || v_club_name || '" เต็มโควตา (' || v_enrolled || '/' || v_capacity || ')');
@@ -362,12 +386,16 @@ BEGIN
             END IF;
 
             -- ป้องกันลงทะเบียนซ้ำด้วยรหัสนักเรียน — เฉพาะเทอม+ปีปัจจุบัน
+            PERFORM pg_advisory_xact_lock(hashtextextended(
+                'registration-name:' || v_current_year || ':' || lower(v_first_name) || ':' || lower(v_last_name), 0));
             IF v_student_id_cleaned IS NOT NULL THEN
+                PERFORM pg_advisory_xact_lock(hashtextextended(
+                    'registration-student:' || v_current_year || ':' || v_student_id_cleaned, 0));
                 IF EXISTS (SELECT 1 FROM registrations
                            WHERE student_id = v_student_id_cleaned
                              AND academic_year = v_current_year
-                             AND semester = v_current_sem) THEN
-                    v_skipped := v_skipped || jsonb_build_object('row', v_row, 'reason', 'รหัสนักเรียน ' || v_student_id_cleaned || ' ลงทะเบียนเทอมนี้ไปแล้ว');
+                             AND (v_scope = 'academic_year' OR semester = v_current_sem)) THEN
+                    v_skipped := v_skipped || jsonb_build_object('row', v_row, 'reason', CASE WHEN v_scope = 'academic_year' THEN 'รหัสนักเรียน ' || v_student_id_cleaned || ' ลงทะเบียนปีนี้ไปแล้ว' ELSE 'รหัสนักเรียน ' || v_student_id_cleaned || ' ลงทะเบียนเทอมนี้ไปแล้ว' END);
                     CONTINUE;
                 END IF;
             END IF;
@@ -378,9 +406,9 @@ BEGIN
                 WHERE TRIM(first_name) = v_first_name
                   AND TRIM(last_name) = v_last_name
                   AND academic_year = v_current_year
-                  AND semester = v_current_sem
+                  AND (v_scope = 'academic_year' OR semester = v_current_sem)
             ) THEN
-                v_skipped := v_skipped || jsonb_build_object('row', v_row, 'reason', 'นักเรียน ' || v_first_name || ' ' || v_last_name || ' ลงทะเบียนเทอมนี้ไปแล้ว');
+                v_skipped := v_skipped || jsonb_build_object('row', v_row, 'reason', CASE WHEN v_scope = 'academic_year' THEN 'นักเรียน ' || v_first_name || ' ' || v_last_name || ' ลงทะเบียนปีนี้ไปแล้ว' ELSE 'นักเรียน ' || v_first_name || ' ' || v_last_name || ' ลงทะเบียนเทอมนี้ไปแล้ว' END);
                 CONTINUE;
             END IF;
 
@@ -398,7 +426,14 @@ BEGIN
             INSERT INTO registrations (club_id, student_id, prefix, first_name, last_name, level, registration_status, academic_year, semester)
             VALUES (v_club_id, v_student_id_cleaned, v_prefix, v_first_name, v_last_name, v_level, v_status, v_current_year, v_current_sem);
 
-            UPDATE clubs SET enrolled_count = enrolled_count + 1 WHERE id = v_club_id;
+            UPDATE clubs c
+            SET enrolled_count = (
+                SELECT COUNT(*) FROM registrations r
+                WHERE r.club_id = c.id
+                  AND r.academic_year = v_current_year
+                  AND (v_scope = 'academic_year' OR r.semester = v_current_sem)
+            )
+            WHERE c.id = v_club_id;
 
             v_inserted_count := v_inserted_count + 1;
 
@@ -413,7 +448,7 @@ BEGIN
         'BULK_REGISTRATION_IMPORT',
         COALESCE(p_ip_address, 'Unknown IP'),
         COALESCE(p_user_agent, 'Unknown Device'),
-        'Bulk import เทอม ' || v_current_sem || '/' || v_current_year || ': สำเร็จ ' || v_inserted_count
+        'Bulk import ' || CASE WHEN v_scope = 'academic_year' THEN 'ปีการศึกษา ' || v_current_year ELSE 'เทอม ' || v_current_sem || '/' || v_current_year END || ': สำเร็จ ' || v_inserted_count
             || ', ข้าม ' || jsonb_array_length(v_skipped)
             || ', ผิดพลาด ' || jsonb_array_length(v_failed)
     );
@@ -523,6 +558,7 @@ AS $$
 DECLARE
     v_old_year TEXT;
     v_old_sem TEXT;
+    v_scope TEXT;
     v_clubs_reset INT;
 BEGIN
     IF NULLIF(TRIM(p_academic_year), '') IS NULL OR NULLIF(TRIM(p_semester), '') IS NULL THEN
@@ -531,15 +567,24 @@ BEGIN
 
     SELECT
         COALESCE(value->>'academic_year', '2569'),
-        COALESCE(value->>'semester', '1')
-    INTO v_old_year, v_old_sem
+        COALESCE(value->>'semester', '1'),
+        CASE WHEN value->>'registration_scope' = 'academic_year' THEN 'academic_year' ELSE 'semester' END
+    INTO v_old_year, v_old_sem, v_scope
     FROM settings WHERE key = 'school_config';
 
     IF v_old_year = TRIM(p_academic_year) AND v_old_sem = TRIM(p_semester) THEN
         RETURN jsonb_build_object('success', false, 'message', 'เทอม ' || p_semester || '/' || p_academic_year || ' เป็นเทอมปัจจุบันอยู่แล้ว');
     END IF;
 
-    UPDATE clubs SET enrolled_count = 0;
+    IF v_scope = 'academic_year' AND v_old_year = TRIM(p_academic_year) THEN
+        UPDATE clubs c
+        SET enrolled_count = (
+            SELECT COUNT(*) FROM registrations r
+            WHERE r.club_id = c.id AND r.academic_year = TRIM(p_academic_year)
+        );
+    ELSE
+        UPDATE clubs SET enrolled_count = 0;
+    END IF;
     GET DIAGNOSTICS v_clubs_reset = ROW_COUNT;
 
     UPDATE settings
@@ -856,6 +901,7 @@ AS $$
 DECLARE
     v_old_year TEXT;
     v_old_sem TEXT;
+    v_scope TEXT;
     v_reg_count INT;
     v_clubs_updated INT;
     v_old_config JSONB;
@@ -866,9 +912,15 @@ BEGIN
     END IF;
 
     -- ตรวจว่ามีข้อมูลเทอมนี้จริงหรือไม่
+    SELECT value INTO v_old_config FROM settings WHERE key = 'school_config';
+    v_old_year := COALESCE(v_old_config->>'academic_year', '');
+    v_old_sem  := COALESCE(v_old_config->>'semester', '');
+    v_scope := CASE WHEN v_old_config->>'registration_scope' = 'academic_year' THEN 'academic_year' ELSE 'semester' END;
+
     SELECT COUNT(*) INTO v_reg_count
     FROM registrations
-    WHERE academic_year = p_academic_year AND semester = p_semester;
+    WHERE academic_year = p_academic_year
+      AND (v_scope = 'academic_year' OR semester = p_semester);
 
     IF v_reg_count = 0 THEN
         RETURN jsonb_build_object(
@@ -878,10 +930,6 @@ BEGIN
     END IF;
 
     -- อ่าน config ปัจจุบัน
-    SELECT value INTO v_old_config FROM settings WHERE key = 'school_config';
-    v_old_year := COALESCE(v_old_config->>'academic_year', '');
-    v_old_sem  := COALESCE(v_old_config->>'semester', '');
-
     IF v_old_year = p_academic_year AND v_old_sem = p_semester THEN
         RETURN jsonb_build_object(
             'success', false,
@@ -902,7 +950,7 @@ BEGIN
         SELECT COUNT(*) FROM registrations r
         WHERE r.club_id = c.id
           AND r.academic_year = p_academic_year
-          AND r.semester = p_semester
+          AND (v_scope = 'academic_year' OR r.semester = p_semester)
     ), 0);
     GET DIAGNOSTICS v_clubs_updated = ROW_COUNT;
 

@@ -27,7 +27,7 @@ let state = {
     registrations: [],
     auditLogs: [], // เก็บประวัติความปลอดภัยระบบ
     settings: {
-        school_config: { school_name: "ระบบลงทะเบียนชุมนุม", semester: "1", academic_year: "2569" },
+        school_config: { school_name: "ระบบลงทะเบียนชุมนุม", semester: "1", academic_year: "2569", registration_scope: "semester" },
         registration_period: { is_active: true, start_time: "", end_time: "" }
     },
     currentClub: null,
@@ -84,6 +84,22 @@ function getCurrentTerm() {
     };
 }
 
+// กติกาการสมัคร: รายภาคเรียน (ค่าเดิม) หรือสมัครครั้งเดียวใช้ชุมนุมเดิมทั้งปี
+function getRegistrationScope() {
+    const config = (state.settings && state.settings.school_config) || {};
+    return config.registration_scope === "academic_year" ? "academic_year" : "semester";
+}
+
+function getRegistrationScopeLabel() {
+    return getRegistrationScope() === "academic_year" ? "ใช้ชุมนุมเดิมตลอดปีการศึกษา" : "ลงทะเบียนแยกทุกภาคเรียน";
+}
+
+function isRegistrationForCurrentScope(registration) {
+    const term = getCurrentTerm();
+    return registration && registration.academic_year === term.academic_year
+        && (getRegistrationScope() === "academic_year" || registration.semester === term.semester);
+}
+
 // 📅 helper: ใส่ filter เทอม/ปีการศึกษา ลงใน Supabase query ตามค่า dropdown #reg-term-filter
 // __current__ = เทอมปัจจุบัน, __all__ = ทุกเทอม (ไม่กรอง), "<year>|<sem>" = เทอมประวัติ
 function applyTermFilter(query) {
@@ -94,7 +110,8 @@ function applyTermFilter(query) {
     }
     if (value === "__current__") {
         const { academic_year, semester } = getCurrentTerm();
-        return query.eq("academic_year", academic_year).eq("semester", semester);
+        query = query.eq("academic_year", academic_year);
+        return getRegistrationScope() === "academic_year" ? query : query.eq("semester", semester);
     }
     const [y, s] = value.split("|");
     if (y && s) {
@@ -216,10 +233,15 @@ async function loadSystemSettings() {
 function updateSystemUI() {
     const config = state.settings.school_config || {};
     const term = getCurrentTerm();
+    const annualScope = getRegistrationScope() === "academic_year";
     document.getElementById("header-school-name").innerText = config.school_name || "ระบบลงทะเบียนชุมนุม";
-    document.getElementById("header-semester-label").innerText = `ภาคเรียนที่ ${term.semester}/${term.academic_year}`;
+    document.getElementById("header-semester-label").innerText = annualScope
+        ? `ปีการศึกษา ${term.academic_year} · ใช้ชุมนุมเดิมทั้งปี`
+        : `ภาคเรียนที่ ${term.semester}/${term.academic_year}`;
     document.getElementById("banner-school-title").innerText = `ยินดีต้อนรับสู่ระบบลงทะเบียนชุมนุม ${config.school_name || ""}`;
-    document.getElementById("banner-semester-badge").innerText = `ภาคเรียนที่ ${term.semester} ปีการศึกษา ${term.academic_year}`;
+    document.getElementById("banner-semester-badge").innerText = annualScope
+        ? `ลงทะเบียนครั้งเดียว · ใช้ชุมนุมเดิมตลอดปีการศึกษา ${term.academic_year}`
+        : `ภาคเรียนที่ ${term.semester} ปีการศึกษา ${term.academic_year}`;
     document.getElementById("ticket-school-name").innerText = config.school_name || "";
 
     // 🖼️ อัปเดตโลโก้โรงเรียน (Header Logo)
@@ -466,8 +488,8 @@ function renderClubsGrid() {
         // รวบรวมรายชื่อระดับชั้นมาแสดงเป็น Badge
         const gradeBadgesHtml = club.grades.map(g => `<span class="grade-badge">${g}</span>`).join(" ");
 
-        // เช็คว่านักเรียนคนนี้ลงทะเบียนแล้วหรือยัง (ในเทอมปัจจุบัน)
-        const myRegs = state.myRegistrations || [];
+        // เช็คว่านักเรียนคนนี้ลงทะเบียนแล้วหรือยังตามขอบเขตที่โรงเรียนกำหนด
+        const myRegs = (state.myRegistrations || []).filter(isRegistrationForCurrentScope);
         const myRegInThisClub = myRegs.find(r => r.club_id === club.id);
         const hasRegisteredAnywhere = myRegs.length > 0;
 
@@ -480,7 +502,8 @@ function renderClubsGrid() {
             // ลงชุมนุมอื่นไปแล้ว — ห้ามลงเพิ่ม (DB กันไว้)
             const otherClubName = (myRegs[0].clubs && myRegs[0].clubs.name) ? myRegs[0].clubs.name : "ชุมนุมอื่น";
             const safeOther = otherClubName.replace(/"/g, "&quot;");
-            btnHtml = `<button class="register-btn closed" disabled title="คุณได้ลงทะเบียน &quot;${safeOther}&quot; ในเทอมนี้แล้ว"><i class="fa-solid fa-lock"></i> ลงชุมนุมอื่นแล้ว</button>`;
+            const scopeText = getRegistrationScope() === "academic_year" ? "ปีการศึกษานี้" : "ภาคเรียนนี้";
+            btnHtml = `<button class="register-btn closed" disabled title="คุณได้ลงทะเบียน &quot;${safeOther}&quot; ใน${scopeText}แล้ว"><i class="fa-solid fa-lock"></i> ลงชุมนุมอื่นแล้ว</button>`;
         } else if (!systemOpen) {
             btnHtml = `<button class="register-btn closed" disabled><i class="fa-solid fa-lock"></i> ยังไม่เปิดให้ลงทะเบียน</button>`;
         } else if (isFull) {
@@ -809,9 +832,10 @@ async function renderMyRegistrations() {
             }
         }));
 
-        state.myRegistrations = data || [];
+        const currentData = (data || []).filter(isRegistrationForCurrentScope);
+        state.myRegistrations = currentData;
 
-        if (!data || data.length === 0) {
+        if (currentData.length === 0) {
             if (card) {
                 card.style.display = "none";
                 card.innerHTML = "";
@@ -820,7 +844,7 @@ async function renderMyRegistrations() {
             return;
         }
 
-        const itemsHtml = data.map(reg => {
+        const itemsHtml = currentData.map(reg => {
             const clubName = (reg.clubs && reg.clubs.name) ? reg.clubs.name : "ไม่ระบุชุมนุม";
             const teacher = (reg.clubs && reg.clubs.teacher) ? reg.clubs.teacher : "";
             const location = (reg.clubs && reg.clubs.location) ? reg.clubs.location : "";
@@ -846,7 +870,7 @@ async function renderMyRegistrations() {
                 <div class="identity-card" style="padding: 14px;">
                     <div class="identity-card-header" style="color: var(--accent-mint); margin-bottom: 8px;">
                         <i class="fa-solid fa-circle-check"></i>
-                        <span>ผลการลงทะเบียนของฉัน · ภาคเรียนที่ ${semester}/${academic_year}</span>
+                        <span>ผลการลงทะเบียนของฉัน · ${getRegistrationScopeLabel()} (${getCurrentTerm().academic_year})</span>
                     </div>
                     <div style="display:flex; flex-direction:column; gap:8px;">${itemsHtml}</div>
                 </div>
@@ -1368,7 +1392,9 @@ async function populateTermFilterDropdown() {
     select.innerHTML = "";
     const optCurrent = document.createElement("option");
     optCurrent.value = "__current__";
-    optCurrent.textContent = `เทอมปัจจุบัน (${curSem}/${curYear})`;
+    optCurrent.textContent = getRegistrationScope() === "academic_year"
+        ? `ปีการศึกษาปัจจุบัน (${curYear})`
+        : `เทอมปัจจุบัน (${curSem}/${curYear})`;
     select.appendChild(optCurrent);
 
     const optAll = document.createElement("option");
@@ -1551,16 +1577,18 @@ async function loadAdminDashboardData() {
 
     try {
         const { academic_year, semester } = getCurrentTerm();
-        // ดึงการลงทะเบียนของเทอมปัจจุบันพร้อมข้อมูลความสัมพันธ์
-        const { data: regs, error: errRegs } = await supabaseClient
+        // ดึงรายการตามขอบเขตที่โรงเรียนเลือก: ทั้งปีหรือเฉพาะภาคเรียน
+        let regsQuery = supabaseClient
             .from("registrations")
             .select(`
                 *,
                 clubs ( name, teacher, location )
             `)
-            .eq("academic_year", academic_year)
-            .eq("semester", semester)
-            .order("created_at", { ascending: false });
+            .eq("academic_year", academic_year);
+        if (getRegistrationScope() !== "academic_year") {
+            regsQuery = regsQuery.eq("semester", semester);
+        }
+        const { data: regs, error: errRegs } = await regsQuery.order("created_at", { ascending: false });
 
         if (errRegs) throw errRegs;
         state.registrations = regs || [];
@@ -2238,11 +2266,14 @@ async function getCurrentTermRegistrationMap() {
     const map = new Map();
     if (!supabaseClient) return map;
     const { academic_year, semester } = getCurrentTerm();
-    const { data, error } = await supabaseClient
+    let query = supabaseClient
         .from("registrations")
         .select("student_id, clubs(name)")
-        .eq("academic_year", academic_year)
-        .eq("semester", semester);
+        .eq("academic_year", academic_year);
+    if (getRegistrationScope() !== "academic_year") {
+        query = query.eq("semester", semester);
+    }
+    const { data, error } = await query;
     if (error) {
         console.warn("Failed to load current-term registrations for status map:", error);
         return map;
@@ -3007,6 +3038,7 @@ function renderAdminSettings() {
     document.getElementById("admin-settings-school-name").value = config.school_name || "";
     document.getElementById("admin-settings-academic-year").value = config.academic_year || "";
     document.getElementById("admin-settings-semester").value = config.semester || "";
+    document.getElementById("admin-settings-registration-scope").value = config.registration_scope === "academic_year" ? "academic_year" : "semester";
 
     // 🖼️ แสดงพรีวิวรูปภาพโลโก้เดิม
     const previewBox = document.getElementById("settings-logo-preview");
@@ -3052,6 +3084,9 @@ async function saveSystemSettings() {
     const schoolName = document.getElementById("admin-settings-school-name").value.trim();
     const academicYear = document.getElementById("admin-settings-academic-year").value.trim();
     const semester = document.getElementById("admin-settings-semester").value.trim();
+    const registrationScope = document.getElementById("admin-settings-registration-scope").value === "academic_year"
+        ? "academic_year"
+        : "semester";
 
     const is_active = document.getElementById("admin-settings-is-active").checked;
     const start_time = document.getElementById("admin-settings-start-time").value;
@@ -3066,6 +3101,7 @@ async function saveSystemSettings() {
         school_name: schoolName,
         academic_year: academicYear,
         semester,
+        registration_scope: registrationScope,
         logo_base64: state.temp_logo_base64 || null
     };
 
@@ -3085,6 +3121,12 @@ async function saveSystemSettings() {
         if (res1.error) throw res1.error;
         if (res2.error) throw res2.error;
 
+        const { data: reconcileResult, error: reconcileError } = await supabaseClient.rpc("admin_reconcile_club_counts");
+        if (reconcileError) throw reconcileError;
+        if (reconcileResult && reconcileResult.success === false) {
+            throw new Error(reconcileResult.message || "ไม่สามารถคำนวณจำนวนที่นั่งใหม่ได้");
+        }
+
         showToast("บันทึกการปรับแต่งตั้งค่าโครงสร้างระบบเรียบร้อยแล้ว", "success");
         
         // บันทึกประวัติความปลอดภัย (Audit Log)
@@ -3094,7 +3136,7 @@ async function saveSystemSettings() {
                 action: "SETTINGS_UPDATED",
                 ip_address: ipAddress,
                 user_agent: navigator.userAgent || "Unknown Device",
-                details: `ผู้ดูแลระบบแก้ไขการตั้งค่าระบบ: ชื่อโรงเรียน="${schoolName}", ปีการศึกษา="${academicYear}", ภาคเรียน="${semester}", สถานะเปิดรับสมัคร=${is_active ? 'เปิด' : 'ปิด'}`
+                details: `ผู้ดูแลระบบแก้ไขการตั้งค่าระบบ: ชื่อโรงเรียน="${schoolName}", ปีการศึกษา="${academicYear}", ภาคเรียน="${semester}", รูปแบบสมัคร="${registrationScope === 'academic_year' ? 'รายปีการศึกษา' : 'รายภาคเรียน'}", สถานะเปิดรับสมัคร=${is_active ? 'เปิด' : 'ปิด'}`
             });
         } catch (logErr) {
             console.error("Failed to write settings audit log:", logErr);
@@ -3876,9 +3918,14 @@ async function startNewTerm() {
         return;
     }
 
+    const sameAcademicYear = academicYear === getCurrentTerm().academic_year;
+    const annualScope = getRegistrationScope() === "academic_year";
+    const seatWarning = annualScope && sameAcademicYear
+        ? "• โรงเรียนใช้ชุมนุมเดิมทั้งปี จำนวนสมาชิกเดิมจะคงอยู่และไม่รีเซ็ต\n"
+        : "• ที่นั่งของทุกชุมนุมจะถูกรีเซ็ตเป็น 0\n";
     const warning =
         `⚠️ ยืนยันเริ่มเทอมใหม่: ${semester}/${academicYear}?\n\n` +
-        "• ที่นั่งของทุกชุมนุมจะถูกรีเซ็ตเป็น 0\n" +
+        seatWarning +
         "• ข้อมูลการลงทะเบียนของเทอมเก่าจะถูกเก็บเป็นประวัติ\n" +
         "• ระบบจะเริ่มรับสมัครของเทอมใหม่นี้แทน\n\n" +
         "หากต้องการย้อนกลับ สามารถใช้ปุ่ม 'ย้อนกลับเทอม' ได้ภายหลัง ดำเนินการต่อหรือไม่?";
@@ -3960,7 +4007,9 @@ async function rollbackToTerm() {
         const warning =
             `⚠️ ยืนยันย้อนกลับไปยังเทอม ${chosen.semester}/${chosen.academic_year}?\n\n` +
             `• ระบบจะเปลี่ยนปี/ภาคเรียนปัจจุบันเป็น ${chosen.semester}/${chosen.academic_year}\n` +
-            `• จำนวนสมาชิกของแต่ละชุมนุมจะถูกคำนวณใหม่จากการสมัครของเทอมนั้น\n` +
+            (getRegistrationScope() === "academic_year"
+                ? `• โหมดรายปีจะคำนวณจำนวนสมาชิกจากการสมัครทั้งหมดของปีการศึกษา ${chosen.academic_year}\n`
+                : `• จำนวนสมาชิกของแต่ละชุมนุมจะถูกคำนวณใหม่จากการสมัครของเทอมนั้น\n`) +
             `• ข้อมูลการสมัคร ${chosen.registration_count} รายการจะกลับมาใช้งานได้\n\n` +
             "ดำเนินการต่อหรือไม่?";
         if (!confirm(warning)) return;

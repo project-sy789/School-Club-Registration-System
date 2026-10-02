@@ -21,6 +21,14 @@ REVOKE ALL ON private.registration_secrets FROM PUBLIC, anon, authenticated;
 ALTER TABLE settings
     ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
 
+-- Existing installations keep the original per-semester behavior unless an
+-- administrator explicitly switches the school to one registration per year.
+UPDATE settings
+SET value = value || jsonb_build_object('registration_scope', 'semester'),
+    updated_at = now()
+WHERE key = 'school_config'
+  AND NOT (value ? 'registration_scope');
+
 ALTER TABLE students
     ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid();
 
@@ -257,6 +265,8 @@ DECLARE
     v_registration RECORD;
     v_year TEXT;
     v_semester TEXT;
+    v_scope TEXT;
+    v_current_enrolled INTEGER;
     v_is_active BOOLEAN;
     v_start_time TIMESTAMPTZ;
     v_end_time TIMESTAMPTZ;
@@ -294,8 +304,9 @@ BEGIN
     END IF;
 
     SELECT COALESCE(value->>'academic_year', '2569'),
-           COALESCE(value->>'semester', '1')
-    INTO v_year, v_semester
+           COALESCE(value->>'semester', '1'),
+           CASE WHEN value->>'registration_scope' = 'academic_year' THEN 'academic_year' ELSE 'semester' END
+    INTO v_year, v_semester, v_scope
     FROM settings
     WHERE key = 'school_config';
 
@@ -322,6 +333,14 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'code', 'CLUB_NOT_FOUND', 'message', 'ไม่พบชุมนุมที่เลือก');
     END IF;
 
+    -- Reconcile the cached counter when annual mode is enabled. This also
+    -- makes switching from semester mode safe without a manual recount.
+    IF v_scope = 'academic_year' THEN
+        SELECT COUNT(*) INTO v_current_enrolled
+        FROM registrations
+        WHERE club_id = v_club.id AND academic_year = v_year;
+    END IF;
+
     -- A retry may have been waiting on the club lock while the original
     -- request committed. Re-read the key after serialization so it returns
     -- the original result instead of being rejected as a full club.
@@ -340,7 +359,7 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'code', 'GRADE_NOT_ALLOWED', 'message', 'ชุมนุมนี้ไม่เปิดรับระดับชั้นของคุณ');
     END IF;
 
-    IF v_club.enrolled_count >= v_club.capacity THEN
+    IF COALESCE(v_current_enrolled, v_club.enrolled_count) >= v_club.capacity THEN
         RETURN jsonb_build_object('success', false, 'code', 'CLUB_FULL', 'message', 'ชุมนุม "' || v_club.name || '" เต็มโควตาแล้ว');
     END IF;
 
@@ -400,6 +419,58 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'code', 'CONTACT_PHONE_REQUIRED', 'message', 'นักเรียนที่ยังไม่มีรหัสให้ใช้เบอร์โทรศัพท์ผู้ปกครอง 10 หลัก');
     END IF;
 
+    -- Serialize identity checks across clubs. The existing semester indexes
+    -- cannot prevent an annual-mode duplicate submitted to two clubs at once.
+    PERFORM pg_advisory_xact_lock(hashtextextended(
+        'registration-name:' || v_year || ':' || lower(v_first_name) || ':' || lower(v_last_name), 0));
+    IF v_student_id IS NOT NULL THEN
+        PERFORM pg_advisory_xact_lock(hashtextextended('registration-student:' || v_year || ':' || v_student_id, 0));
+    END IF;
+    IF v_pending_contact_hash IS NOT NULL THEN
+        PERFORM pg_advisory_xact_lock(hashtextextended('registration-contact:' || v_year || ':' || v_pending_contact_hash, 0));
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM registrations
+        WHERE lower(btrim(first_name)) = lower(v_first_name)
+          AND lower(btrim(last_name)) = lower(v_last_name)
+          AND academic_year = v_year
+          AND (v_scope = 'academic_year' OR semester = v_semester)
+    ) THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'code', 'ALREADY_REGISTERED',
+            'message', CASE WHEN v_scope = 'academic_year'
+                THEN 'นักเรียนคนนี้ลงทะเบียนชุมนุมในปีการศึกษานี้แล้ว'
+                ELSE 'นักเรียนคนนี้ลงทะเบียนชุมนุมในภาคเรียนนี้แล้ว' END
+        );
+    END IF;
+    IF v_student_id IS NOT NULL AND EXISTS (
+        SELECT 1 FROM registrations
+        WHERE student_id = v_student_id
+          AND academic_year = v_year
+          AND (v_scope = 'academic_year' OR semester = v_semester)
+    ) THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'code', 'ALREADY_REGISTERED',
+            'message', CASE WHEN v_scope = 'academic_year'
+                THEN 'รหัสนักเรียนนี้มีรายการสมัครในปีการศึกษานี้แล้ว'
+                ELSE 'รหัสนักเรียนนี้มีรายการสมัครในภาคเรียนนี้แล้ว' END
+        );
+    END IF;
+    IF v_pending_contact_hash IS NOT NULL AND EXISTS (
+        SELECT 1 FROM registrations
+        WHERE pending_contact_hash = v_pending_contact_hash
+          AND academic_year = v_year
+          AND (v_scope = 'academic_year' OR semester = v_semester)
+    ) THEN
+        RETURN jsonb_build_object('success', false, 'code', 'ALREADY_REGISTERED',
+            'message', CASE WHEN v_scope = 'academic_year'
+                THEN 'ข้อมูลติดต่อสำหรับนักเรียนใหม่นี้ถูกใช้ลงทะเบียนในปีการศึกษานี้แล้ว'
+                ELSE 'ข้อมูลติดต่อสำหรับนักเรียนใหม่นี้ถูกใช้ลงทะเบียนในภาคเรียนนี้แล้ว' END);
+    END IF;
+
     BEGIN
         INSERT INTO registrations (
             club_id, student_id, pending_contact_hash, pending_contact_hint, request_key,
@@ -426,9 +497,14 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'code', 'ALREADY_REGISTERED', 'message', 'นักเรียนคนนี้ลงทะเบียนในเทอมนี้แล้ว');
     END;
 
-    UPDATE clubs
-    SET enrolled_count = enrolled_count + 1
-    WHERE id = v_club.id;
+    UPDATE clubs c
+    SET enrolled_count = (
+        SELECT COUNT(*) FROM registrations r
+        WHERE r.club_id = c.id
+          AND r.academic_year = v_year
+          AND (v_scope = 'academic_year' OR r.semester = v_semester)
+    )
+    WHERE c.id = v_club.id;
 
     INSERT INTO audit_logs (student_id, student_name, action, club_name, ip_address, user_agent, details)
     VALUES (
@@ -438,7 +514,7 @@ BEGIN
         v_club.name,
         left(COALESCE(p_ip_address, 'Unknown IP'), 128),
         left(COALESCE(p_user_agent, 'Unknown Device'), 500),
-        'term=' || v_semester || '/' || v_year || '; status=' || v_status
+        'term=' || v_semester || '/' || v_year || '; scope=' || v_scope || '; status=' || v_status
     );
 
     RETURN jsonb_build_object(
@@ -470,13 +546,15 @@ DECLARE
     v_student RECORD;
     v_year TEXT;
     v_semester TEXT;
+    v_scope TEXT;
 BEGIN
     IF NOT is_admin() THEN
         RETURN jsonb_build_object('success', false, 'code', 'FORBIDDEN', 'message', 'ไม่มีสิทธิ์ผู้ดูแลระบบ');
     END IF;
 
-    SELECT value->>'academic_year', value->>'semester'
-    INTO v_year, v_semester FROM settings WHERE key = 'school_config';
+    SELECT value->>'academic_year', value->>'semester',
+           CASE WHEN value->>'registration_scope' = 'academic_year' THEN 'academic_year' ELSE 'semester' END
+    INTO v_year, v_semester, v_scope FROM settings WHERE key = 'school_config';
 
     SELECT r.*, c.name AS club_name
     INTO v_reg
@@ -494,12 +572,22 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'code', 'STUDENT_NOT_FOUND', 'message', 'ไม่พบรหัสนักเรียนที่ยังใช้งาน');
     END IF;
 
+    PERFORM pg_advisory_xact_lock(hashtextextended(
+        'registration-name:' || v_reg.academic_year || ':' || lower(btrim(v_student.first_name)) || ':' || lower(btrim(v_student.last_name)), 0));
+    PERFORM pg_advisory_xact_lock(hashtextextended(
+        'registration-student:' || v_reg.academic_year || ':' || v_student.student_id, 0));
+
     IF EXISTS (
         SELECT 1 FROM registrations
         WHERE student_id = v_student.student_id
-          AND academic_year = v_year AND semester = v_semester AND id <> v_reg.id
+          AND academic_year = v_reg.academic_year
+          AND (v_scope = 'academic_year' OR semester = v_reg.semester)
+          AND id <> v_reg.id
     ) THEN
-        RETURN jsonb_build_object('success', false, 'code', 'ALREADY_REGISTERED', 'message', 'รหัสนักเรียนนี้มีรายการสมัครในเทอมนี้แล้ว');
+        RETURN jsonb_build_object('success', false, 'code', 'ALREADY_REGISTERED',
+            'message', CASE WHEN v_scope = 'academic_year'
+                THEN 'รหัสนักเรียนนี้มีรายการสมัครในปีการศึกษานี้แล้ว'
+                ELSE 'รหัสนักเรียนนี้มีรายการสมัครในภาคเรียนนี้แล้ว' END);
     END IF;
 
     UPDATE registrations
@@ -536,14 +624,16 @@ DECLARE
     v_reg RECORD;
     v_year TEXT;
     v_semester TEXT;
+    v_scope TEXT;
     v_name TEXT;
 BEGIN
     IF NOT is_admin() THEN
         RETURN jsonb_build_object('success', false, 'code', 'FORBIDDEN', 'message', 'ไม่มีสิทธิ์ผู้ดูแลระบบ');
     END IF;
 
-    SELECT value->>'academic_year', value->>'semester'
-    INTO v_year, v_semester FROM settings WHERE key = 'school_config';
+    SELECT value->>'academic_year', value->>'semester',
+           CASE WHEN value->>'registration_scope' = 'academic_year' THEN 'academic_year' ELSE 'semester' END
+    INTO v_year, v_semester, v_scope FROM settings WHERE key = 'school_config';
 
     SELECT r.*, c.name AS club_name
     INTO v_reg
@@ -557,11 +647,12 @@ BEGIN
     v_name := concat_ws('', v_reg.prefix, v_reg.first_name, ' ', v_reg.last_name);
     DELETE FROM registrations WHERE id = v_reg.id;
 
-    IF v_reg.academic_year = v_year AND v_reg.semester = v_semester THEN
+    IF v_reg.academic_year = v_year AND (v_scope = 'academic_year' OR v_reg.semester = v_semester) THEN
         UPDATE clubs c
         SET enrolled_count = (
             SELECT COUNT(*) FROM registrations r
-            WHERE r.club_id = c.id AND r.academic_year = v_year AND r.semester = v_semester
+            WHERE r.club_id = c.id AND r.academic_year = v_year
+              AND (v_scope = 'academic_year' OR r.semester = v_semester)
         )
         WHERE c.id = v_reg.club_id;
     END IF;
@@ -599,6 +690,8 @@ DECLARE
     v_club RECORD;
     v_year TEXT;
     v_semester TEXT;
+    v_scope TEXT;
+    v_current_enrolled INTEGER;
     v_id UUID := p_registration_id;
     v_old_club_id UUID;
     v_status TEXT := CASE WHEN p_registration_status = 'verified' THEN 'verified' ELSE 'pending' END;
@@ -611,16 +704,52 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'code', 'INVALID_INPUT', 'message', 'ข้อมูลไม่ครบถ้วน');
     END IF;
 
-    SELECT value->>'academic_year', value->>'semester'
-    INTO v_year, v_semester FROM settings WHERE key = 'school_config';
+    SELECT value->>'academic_year', value->>'semester',
+           CASE WHEN value->>'registration_scope' = 'academic_year' THEN 'academic_year' ELSE 'semester' END
+    INTO v_year, v_semester, v_scope FROM settings WHERE key = 'school_config';
     SELECT id, name, capacity, enrolled_count INTO v_club FROM clubs WHERE id = p_club_id FOR UPDATE;
     IF NOT FOUND THEN
         RETURN jsonb_build_object('success', false, 'code', 'CLUB_NOT_FOUND', 'message', 'ไม่พบชุมนุม');
     END IF;
 
+    IF v_scope = 'academic_year' THEN
+        SELECT COUNT(*) INTO v_current_enrolled
+        FROM registrations
+        WHERE club_id = p_club_id AND academic_year = v_year;
+    END IF;
+
     IF v_id IS NULL THEN
-        IF v_club.enrolled_count >= v_club.capacity AND NOT p_allow_over_capacity THEN
+        IF COALESCE(v_current_enrolled, v_club.enrolled_count) >= v_club.capacity AND NOT p_allow_over_capacity THEN
             RETURN jsonb_build_object('success', false, 'code', 'CLUB_FULL', 'message', 'ชุมนุมเต็มโควตาแล้ว');
+        END IF;
+        PERFORM pg_advisory_xact_lock(hashtextextended(
+            'registration-name:' || v_year || ':' || lower(btrim(p_first_name)) || ':' || lower(btrim(p_last_name)), 0));
+        IF NULLIF(btrim(p_student_id), '') IS NOT NULL THEN
+            PERFORM pg_advisory_xact_lock(hashtextextended(
+                'registration-student:' || v_year || ':' || btrim(p_student_id), 0));
+        END IF;
+        IF EXISTS (
+            SELECT 1 FROM registrations
+            WHERE lower(btrim(first_name)) = lower(btrim(p_first_name))
+              AND lower(btrim(last_name)) = lower(btrim(p_last_name))
+              AND academic_year = v_year
+              AND (v_scope = 'academic_year' OR semester = v_semester)
+        ) THEN
+            RETURN jsonb_build_object('success', false, 'code', 'ALREADY_REGISTERED',
+                'message', CASE WHEN v_scope = 'academic_year'
+                    THEN 'นักเรียนคนนี้ลงทะเบียนชุมนุมในปีการศึกษานี้แล้ว'
+                    ELSE 'นักเรียนคนนี้ลงทะเบียนชุมนุมในภาคเรียนนี้แล้ว' END);
+        END IF;
+        IF NULLIF(btrim(p_student_id), '') IS NOT NULL AND EXISTS (
+            SELECT 1 FROM registrations
+            WHERE student_id = NULLIF(btrim(p_student_id), '')
+              AND academic_year = v_year
+              AND (v_scope = 'academic_year' OR semester = v_semester)
+        ) THEN
+            RETURN jsonb_build_object('success', false, 'code', 'ALREADY_REGISTERED',
+                'message', CASE WHEN v_scope = 'academic_year'
+                    THEN 'รหัสนักเรียนนี้มีรายการสมัครในปีการศึกษานี้แล้ว'
+                    ELSE 'รหัสนักเรียนนี้มีรายการสมัครในภาคเรียนนี้แล้ว' END);
         END IF;
         BEGIN
             INSERT INTO registrations (club_id, student_id, prefix, first_name, last_name, level,
@@ -638,9 +767,34 @@ BEGIN
         END IF;
         v_old_club_id := v_existing.club_id;
         IF v_old_club_id IS DISTINCT FROM p_club_id
-           AND v_club.enrolled_count >= v_club.capacity
+           AND COALESCE(v_current_enrolled, v_club.enrolled_count) >= v_club.capacity
            AND NOT p_allow_over_capacity THEN
             RETURN jsonb_build_object('success', false, 'code', 'CLUB_FULL', 'message', 'ชุมนุมเต็มโควตาแล้ว');
+        END IF;
+        PERFORM pg_advisory_xact_lock(hashtextextended(
+            'registration-name:' || v_year || ':' || lower(btrim(p_first_name)) || ':' || lower(btrim(p_last_name)), 0));
+        IF NULLIF(btrim(p_student_id), '') IS NOT NULL THEN
+            PERFORM pg_advisory_xact_lock(hashtextextended(
+                'registration-student:' || v_year || ':' || btrim(p_student_id), 0));
+        END IF;
+        IF EXISTS (
+            SELECT 1 FROM registrations
+            WHERE lower(btrim(first_name)) = lower(btrim(p_first_name))
+              AND lower(btrim(last_name)) = lower(btrim(p_last_name))
+              AND academic_year = v_year
+              AND (v_scope = 'academic_year' OR semester = v_semester)
+              AND id <> v_id
+        ) OR (NULLIF(btrim(p_student_id), '') IS NOT NULL AND EXISTS (
+            SELECT 1 FROM registrations
+            WHERE student_id = NULLIF(btrim(p_student_id), '')
+              AND academic_year = v_year
+              AND (v_scope = 'academic_year' OR semester = v_semester)
+              AND id <> v_id
+        )) THEN
+            RETURN jsonb_build_object('success', false, 'code', 'ALREADY_REGISTERED',
+                'message', CASE WHEN v_scope = 'academic_year'
+                    THEN 'นักเรียนคนนี้มีรายการสมัครในปีการศึกษานี้แล้ว'
+                    ELSE 'นักเรียนคนนี้มีรายการสมัครในภาคเรียนนี้แล้ว' END);
         END IF;
         UPDATE registrations
         SET club_id = p_club_id, student_id = NULLIF(btrim(p_student_id), ''),
@@ -652,7 +806,8 @@ BEGIN
     UPDATE clubs c
     SET enrolled_count = (
         SELECT COUNT(*) FROM registrations r
-        WHERE r.club_id = c.id AND r.academic_year = v_year AND r.semester = v_semester
+        WHERE r.club_id = c.id AND r.academic_year = v_year
+          AND (v_scope = 'academic_year' OR r.semester = v_semester)
     )
     WHERE c.id IN (p_club_id, v_old_club_id);
 
@@ -716,6 +871,224 @@ REVOKE ALL ON FUNCTION delete_graduated_student(UUID, TEXT, TEXT) FROM PUBLIC, a
 REVOKE ALL ON FUNCTION list_archived_terms() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION rollback_to_term(TEXT, TEXT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
 
+-- Keep the public helper used by admin_start_new_term in sync with the
+-- school's registration scope. Annual mode carries seats into semester 2,
+-- while a new academic year starts with empty seats.
+CREATE OR REPLACE FUNCTION start_new_term(
+    p_academic_year TEXT,
+    p_semester TEXT,
+    p_ip_address TEXT DEFAULT NULL,
+    p_user_agent TEXT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_old_year TEXT;
+    v_old_sem TEXT;
+    v_scope TEXT;
+    v_clubs_reset INT;
+BEGIN
+    IF NULLIF(btrim(p_academic_year), '') IS NULL OR NULLIF(btrim(p_semester), '') IS NULL THEN
+        RETURN jsonb_build_object('success', false, 'message', 'กรุณาระบุปีการศึกษาและภาคเรียน');
+    END IF;
+
+    SELECT COALESCE(value->>'academic_year', '2569'),
+           COALESCE(value->>'semester', '1'),
+           CASE WHEN value->>'registration_scope' = 'academic_year' THEN 'academic_year' ELSE 'semester' END
+    INTO v_old_year, v_old_sem, v_scope
+    FROM settings
+    WHERE key = 'school_config'
+    FOR UPDATE;
+
+    IF v_old_year = btrim(p_academic_year) AND v_old_sem = btrim(p_semester) THEN
+        RETURN jsonb_build_object('success', false, 'message', 'เทอม ' || p_semester || '/' || p_academic_year || ' เป็นเทอมปัจจุบันอยู่แล้ว');
+    END IF;
+
+    IF v_scope = 'academic_year' AND v_old_year = btrim(p_academic_year) THEN
+        UPDATE clubs c
+        SET enrolled_count = (
+            SELECT COUNT(*) FROM registrations r
+            WHERE r.club_id = c.id AND r.academic_year = btrim(p_academic_year)
+        );
+    ELSE
+        UPDATE clubs SET enrolled_count = 0;
+    END IF;
+    GET DIAGNOSTICS v_clubs_reset = ROW_COUNT;
+
+    UPDATE settings
+    SET value = value || jsonb_build_object('academic_year', btrim(p_academic_year), 'semester', btrim(p_semester)),
+        updated_at = now()
+    WHERE key = 'school_config';
+
+    INSERT INTO audit_logs (action, ip_address, user_agent, details)
+    VALUES ('START_NEW_TERM', left(COALESCE(p_ip_address, 'Unknown IP'), 128),
+            left(COALESCE(p_user_agent, 'Unknown Device'), 500),
+            'เริ่มเทอมใหม่: ' || v_old_sem || '/' || v_old_year || ' → ' || p_semester || '/' || p_academic_year
+            || CASE WHEN v_scope = 'academic_year' AND v_old_year = btrim(p_academic_year)
+                    THEN ' (โหมดใช้ชุมนุมเดิมทั้งปี ไม่รีเซ็ตยอด)'
+                    ELSE ' (รีเซ็ตที่นั่ง ' || v_clubs_reset || ' ชุมนุม)' END);
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'old_term', v_old_sem || '/' || v_old_year,
+        'new_term', btrim(p_semester) || '/' || btrim(p_academic_year),
+        'clubs_reset', CASE WHEN v_scope = 'academic_year' AND v_old_year = btrim(p_academic_year) THEN 0 ELSE v_clubs_reset END,
+        'registration_scope', v_scope
+    );
+END;
+$$;
+
+REVOKE ALL ON FUNCTION start_new_term(TEXT, TEXT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+
+-- Replace the bootstrap bulk importer so annual mode applies to admin imports
+-- as well as public first-come-first-served registrations.
+CREATE OR REPLACE FUNCTION bulk_register_atomic(
+    p_rows JSONB,
+    p_ip_address TEXT DEFAULT NULL,
+    p_user_agent TEXT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_row JSONB;
+    v_club_id UUID;
+    v_club_name TEXT;
+    v_capacity INTEGER;
+    v_enrolled INTEGER;
+    v_input_club_name TEXT;
+    v_student_id_cleaned TEXT;
+    v_student_exists BOOLEAN;
+    v_first_name TEXT;
+    v_last_name TEXT;
+    v_prefix TEXT;
+    v_level TEXT;
+    v_status TEXT;
+    v_inserted_count INT := 0;
+    v_skipped JSONB := '[]'::jsonb;
+    v_failed JSONB := '[]'::jsonb;
+    v_current_year TEXT;
+    v_current_sem TEXT;
+    v_scope TEXT;
+BEGIN
+    SELECT COALESCE(value->>'academic_year', '2569'),
+           COALESCE(value->>'semester', '1'),
+           CASE WHEN value->>'registration_scope' = 'academic_year' THEN 'academic_year' ELSE 'semester' END
+    INTO v_current_year, v_current_sem, v_scope
+    FROM settings WHERE key = 'school_config';
+
+    FOR v_row IN SELECT * FROM jsonb_array_elements(COALESCE(p_rows, '[]'::jsonb)) LOOP
+        BEGIN
+            v_student_id_cleaned := NULLIF(btrim(COALESCE(v_row->>'student_id', '')), '');
+            v_prefix := NULLIF(btrim(COALESCE(v_row->>'prefix', '')), '');
+            v_first_name := btrim(COALESCE(v_row->>'first_name', ''));
+            v_last_name := btrim(COALESCE(v_row->>'last_name', ''));
+            v_level := btrim(COALESCE(v_row->>'level', ''));
+            v_input_club_name := btrim(COALESCE(v_row->>'club_name', ''));
+
+            IF v_first_name = '' OR v_last_name = '' OR v_input_club_name = '' OR v_level = '' THEN
+                v_failed := v_failed || jsonb_build_object('row', v_row, 'reason', 'ข้อมูลไม่ครบ (ต้องมี first_name, last_name, level, club_name)');
+                CONTINUE;
+            END IF;
+
+            SELECT id, name, capacity, enrolled_count
+            INTO v_club_id, v_club_name, v_capacity, v_enrolled
+            FROM clubs
+            WHERE lower(btrim(name)) = lower(v_input_club_name)
+            LIMIT 1
+            FOR UPDATE;
+
+            IF v_club_id IS NULL THEN
+                v_failed := v_failed || jsonb_build_object('row', v_row, 'reason', 'ไม่พบชุมนุมชื่อ "' || v_input_club_name || '" ในระบบ');
+                CONTINUE;
+            END IF;
+
+            IF v_scope = 'academic_year' THEN
+                SELECT COUNT(*) INTO v_enrolled
+                FROM registrations
+                WHERE club_id = v_club_id AND academic_year = v_current_year;
+            END IF;
+
+            IF v_enrolled >= v_capacity THEN
+                v_skipped := v_skipped || jsonb_build_object('row', v_row, 'reason', 'ชุมนุม "' || v_club_name || '" เต็มโควตา (' || v_enrolled || '/' || v_capacity || ')');
+                CONTINUE;
+            END IF;
+
+            PERFORM pg_advisory_xact_lock(hashtextextended(
+                'registration-name:' || v_current_year || ':' || lower(v_first_name) || ':' || lower(v_last_name), 0));
+            IF v_student_id_cleaned IS NOT NULL THEN
+                PERFORM pg_advisory_xact_lock(hashtextextended(
+                    'registration-student:' || v_current_year || ':' || v_student_id_cleaned, 0));
+                IF EXISTS (
+                    SELECT 1 FROM registrations
+                    WHERE student_id = v_student_id_cleaned
+                      AND academic_year = v_current_year
+                      AND (v_scope = 'academic_year' OR semester = v_current_sem)
+                ) THEN
+                    v_skipped := v_skipped || jsonb_build_object('row', v_row, 'reason', CASE WHEN v_scope = 'academic_year' THEN 'รหัสนักเรียน ' || v_student_id_cleaned || ' ลงทะเบียนปีนี้ไปแล้ว' ELSE 'รหัสนักเรียน ' || v_student_id_cleaned || ' ลงทะเบียนเทอมนี้ไปแล้ว' END);
+                    CONTINUE;
+                END IF;
+            END IF;
+
+            IF EXISTS (
+                SELECT 1 FROM registrations
+                WHERE lower(btrim(first_name)) = lower(v_first_name)
+                  AND lower(btrim(last_name)) = lower(v_last_name)
+                  AND academic_year = v_current_year
+                  AND (v_scope = 'academic_year' OR semester = v_current_sem)
+            ) THEN
+                v_skipped := v_skipped || jsonb_build_object('row', v_row, 'reason', CASE WHEN v_scope = 'academic_year' THEN 'นักเรียน ' || v_first_name || ' ' || v_last_name || ' ลงทะเบียนปีนี้ไปแล้ว' ELSE 'นักเรียน ' || v_first_name || ' ' || v_last_name || ' ลงทะเบียนเทอมนี้ไปแล้ว' END);
+                CONTINUE;
+            END IF;
+
+            IF v_student_id_cleaned IS NOT NULL THEN
+                SELECT EXISTS (
+                    SELECT 1 FROM students
+                    WHERE student_id = v_student_id_cleaned AND status = 'active'
+                ) INTO v_student_exists;
+            ELSE
+                v_student_exists := false;
+            END IF;
+            v_status := CASE WHEN v_student_exists THEN 'verified' ELSE 'pending' END;
+
+            INSERT INTO registrations (club_id, student_id, prefix, first_name, last_name, level,
+                                       registration_status, academic_year, semester)
+            VALUES (v_club_id, v_student_id_cleaned, v_prefix, v_first_name, v_last_name,
+                    v_level, v_status, v_current_year, v_current_sem);
+
+            UPDATE clubs c
+            SET enrolled_count = (
+                SELECT COUNT(*) FROM registrations r
+                WHERE r.club_id = c.id
+                  AND r.academic_year = v_current_year
+                  AND (v_scope = 'academic_year' OR r.semester = v_current_sem)
+            )
+            WHERE c.id = v_club_id;
+            v_inserted_count := v_inserted_count + 1;
+        EXCEPTION WHEN OTHERS THEN
+            v_failed := v_failed || jsonb_build_object('row', v_row, 'reason', SQLERRM);
+        END;
+    END LOOP;
+
+    INSERT INTO audit_logs (action, ip_address, user_agent, details)
+    VALUES ('BULK_REGISTRATION_IMPORT', left(COALESCE(p_ip_address, 'Unknown IP'), 128),
+            left(COALESCE(p_user_agent, 'Unknown Device'), 500),
+            'Bulk import ' || CASE WHEN v_scope = 'academic_year' THEN 'ปีการศึกษา ' || v_current_year ELSE 'เทอม ' || v_current_sem || '/' || v_current_year END
+            || ': สำเร็จ ' || v_inserted_count || ', ข้าม ' || jsonb_array_length(v_skipped)
+            || ', ผิดพลาด ' || jsonb_array_length(v_failed));
+
+    RETURN jsonb_build_object('success', true, 'inserted', v_inserted_count,
+                              'skipped', v_skipped, 'failed', v_failed);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION bulk_register_atomic(JSONB, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+
 CREATE OR REPLACE FUNCTION admin_bulk_register_atomic(p_rows JSONB, p_ip_address TEXT DEFAULT NULL, p_user_agent TEXT DEFAULT NULL)
 RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 BEGIN
@@ -743,6 +1116,40 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'code', 'FORBIDDEN', 'message', 'ไม่มีสิทธิ์ผู้ดูแลระบบ');
     END IF;
     RETURN public.start_new_term(p_academic_year, p_semester, p_ip_address, p_user_agent);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION admin_reconcile_club_counts()
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_config JSONB;
+    v_year TEXT;
+    v_semester TEXT;
+    v_scope TEXT;
+    v_updated INT;
+BEGIN
+    IF NOT is_admin() THEN
+        RETURN jsonb_build_object('success', false, 'code', 'FORBIDDEN', 'message', 'ไม่มีสิทธิ์ผู้ดูแลระบบ');
+    END IF;
+
+    SELECT value INTO v_config FROM settings WHERE key = 'school_config' FOR UPDATE;
+    v_year := COALESCE(v_config->>'academic_year', '2569');
+    v_semester := COALESCE(v_config->>'semester', '1');
+    v_scope := CASE WHEN v_config->>'registration_scope' = 'academic_year' THEN 'academic_year' ELSE 'semester' END;
+
+    UPDATE clubs c
+    SET enrolled_count = (
+        SELECT COUNT(*) FROM registrations r
+        WHERE r.club_id = c.id
+          AND r.academic_year = v_year
+          AND (v_scope = 'academic_year' OR r.semester = v_semester)
+    );
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    RETURN jsonb_build_object('success', true, 'clubs_updated', v_updated, 'registration_scope', v_scope);
 END;
 $$;
 
@@ -779,12 +1186,14 @@ $$;
 REVOKE ALL ON FUNCTION admin_bulk_register_atomic(JSONB, TEXT, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION admin_promote_all_students(TEXT, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION admin_start_new_term(TEXT, TEXT, TEXT, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION admin_reconcile_club_counts() FROM PUBLIC;
 REVOKE ALL ON FUNCTION admin_list_archived_terms() FROM PUBLIC;
 REVOKE ALL ON FUNCTION admin_anonymize_graduated_students(INT, TEXT, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION admin_delete_graduated_student(UUID, TEXT, TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION admin_bulk_register_atomic(JSONB, TEXT, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION admin_promote_all_students(TEXT, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION admin_start_new_term(TEXT, TEXT, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION admin_reconcile_club_counts() TO authenticated;
 GRANT EXECUTE ON FUNCTION admin_list_archived_terms() TO authenticated;
 GRANT EXECUTE ON FUNCTION admin_anonymize_graduated_students(INT, TEXT, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION admin_delete_graduated_student(UUID, TEXT, TEXT) TO authenticated;
@@ -805,6 +1214,7 @@ DECLARE
     v_old_config JSONB;
     v_old_year TEXT;
     v_old_sem TEXT;
+    v_scope TEXT;
     v_reg_count INT;
     v_clubs_updated INT;
 BEGIN
@@ -817,11 +1227,13 @@ BEGIN
     SELECT value INTO v_old_config FROM settings WHERE key = 'school_config' FOR UPDATE;
     v_old_year := COALESCE(v_old_config->>'academic_year', '');
     v_old_sem := COALESCE(v_old_config->>'semester', '');
+    v_scope := CASE WHEN v_old_config->>'registration_scope' = 'academic_year' THEN 'academic_year' ELSE 'semester' END;
     IF v_old_year = btrim(p_academic_year) AND v_old_sem = btrim(p_semester) THEN
         RETURN jsonb_build_object('success', false, 'message', 'ระบบอยู่ที่เทอมนี้อยู่แล้ว');
     END IF;
     SELECT COUNT(*) INTO v_reg_count FROM registrations
-    WHERE academic_year = btrim(p_academic_year) AND semester = btrim(p_semester);
+    WHERE academic_year = btrim(p_academic_year)
+      AND (v_scope = 'academic_year' OR semester = btrim(p_semester));
     IF v_reg_count = 0 THEN
         RETURN jsonb_build_object('success', false, 'message', 'ไม่พบข้อมูลการสมัครของเทอมที่เลือก');
     END IF;
@@ -832,14 +1244,15 @@ BEGIN
     UPDATE clubs c
     SET enrolled_count = (
         SELECT COUNT(*) FROM registrations r
-        WHERE r.club_id = c.id AND r.academic_year = btrim(p_academic_year) AND r.semester = btrim(p_semester)
+        WHERE r.club_id = c.id AND r.academic_year = btrim(p_academic_year)
+          AND (v_scope = 'academic_year' OR r.semester = btrim(p_semester))
     );
     GET DIAGNOSTICS v_clubs_updated = ROW_COUNT;
     INSERT INTO audit_logs (action, ip_address, user_agent, details)
     VALUES ('ROLLBACK_TO_TERM', left(COALESCE(p_ip_address, 'Unknown IP'), 128),
             left(COALESCE(p_user_agent, 'Unknown Device'), 500),
-            'from=' || v_old_sem || '/' || v_old_year || '; to=' || p_semester || '/' || p_academic_year);
-    RETURN jsonb_build_object('success', true, 'registrations_restored', v_reg_count, 'clubs_updated', v_clubs_updated);
+            'from=' || v_old_sem || '/' || v_old_year || '; to=' || p_semester || '/' || p_academic_year || '; scope=' || v_scope);
+    RETURN jsonb_build_object('success', true, 'registrations_restored', v_reg_count, 'clubs_updated', v_clubs_updated, 'registration_scope', v_scope);
 END;
 $$;
 REVOKE ALL ON FUNCTION rollback_to_term(TEXT, TEXT, TEXT, TEXT) FROM PUBLIC;

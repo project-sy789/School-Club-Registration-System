@@ -575,6 +575,15 @@
                             </div>
 
                             <div class="input-group">
+                                <label for="admin-settings-registration-scope">รูปแบบการลงทะเบียน</label>
+                                <select id="admin-settings-registration-scope">
+                                    <option value="semester">แยกลงทะเบียนทุกภาคเรียน</option>
+                                    <option value="academic_year">สมัครครั้งเดียว ใช้ชุมนุมเดิมทั้งปีการศึกษา</option>
+                                </select>
+                                <p style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 4px;">โหมดรายปีจะไม่เปิดให้นักเรียนสมัครซ้ำในภาคเรียนที่ 2 ของปีเดียวกัน</p>
+                            </div>
+
+                            <div class="input-group">
                                 <label for="admin-settings-start-time">วันเวลาเปิดรับสมัคร</label>
                                 <input type="datetime-local" id="admin-settings-start-time">
                             </div>
@@ -603,7 +612,7 @@
                                     <i class="fa-solid fa-arrow-up-right-dots"></i> เลื่อนชั้นประจำปี (ม.1→ม.2 ... ม.6→จบ)
                                 </button>
                                 <button class="btn-danger" onclick="startNewTerm()">
-                                    <i class="fa-solid fa-rotate-right"></i> เริ่มเทอมใหม่ (รีเซ็ตที่นั่งทั้งหมด)
+                                    <i class="fa-solid fa-rotate-right"></i> เริ่มเทอม/ปีการศึกษาใหม่
                                 </button>
                                 <button class="btn-secondary" onclick="rollbackToTerm()">
                                     <i class="fa-solid fa-clock-rotate-left"></i> ย้อนกลับเทอม (เลือกเทอมเก่าได้ทุกปี)
