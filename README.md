@@ -114,11 +114,13 @@
 ## 🔒 ตั้งค่าผู้ดูแลระบบ (Supabase Auth)
 
 1. ไปที่ Supabase **Authentication → Users → Add user** และสร้างบัญชีอีเมล/รหัสผ่านของครูผู้ดูแล โดยเลือก **Auto Confirm User** ถ้ามีตัวเลือกนี้ หรือเปิดลิงก์ยืนยันอีเมลให้เรียบร้อยก่อนล็อกอิน
-2. คัดลอก **User UID** ของผู้ใช้ แล้วรัน SQL นี้ใน SQL Editor ของโปรเจกต์เดียวกับเว็บไซต์:
+2. ไปที่ **SQL Editor** ของ Supabase โปรเจกต์เดียวกับเว็บไซต์ แล้วรันคำสั่งนี้ โดยเปลี่ยนเฉพาะอีเมล:
 
 ```sql
 insert into public.admin_users (user_id, role, enabled)
-values ('ใส่-User-UID-ของผู้ดูแลที่นี่', 'admin', true)
+select id, 'admin', true
+from auth.users
+where lower(email) = lower('อีเมลผู้ดูแลของคุณ')
 on conflict (user_id)
 do update set role = 'admin', enabled = true;
 ```
