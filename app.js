@@ -911,20 +911,28 @@ async function renderMyRegistrations() {
             requests.push(supabaseClient.rpc("get_my_registrations_by_student", {
                 p_student_id: identity
             }));
+        } else if (info?.is_pending_reference && info.student_id) {
+            requests.push(supabaseClient.rpc("get_my_registrations_by_pending_reference", {
+                p_reference: String(info.student_id).trim(),
+                p_first_name: info.first_name || "",
+                p_last_name: info.last_name || "",
+                p_level: info.level || ""
+            }));
         }
         const responses = await Promise.all(requests);
         const tokenResponse = responses[0];
         if (tokenResponse.error) throw tokenResponse.error;
 
         let rows = tokenResponse.data || [];
-        const studentResponse = responses[1];
-        if (studentResponse && !studentResponse.error) {
-            rows = [...rows, ...(studentResponse.data || [])];
-        } else if (studentResponse?.error) {
-            // Older databases can still use browser tokens until migration runs.
-            console.warn("Student registration lookup is unavailable; using saved tokens.", studentResponse.error);
-            if (studentResponse.error.code === "42883" || studentResponse.error.code === "PGRST202") {
-                showToast("ฐานข้อมูลยังไม่รองรับการค้นหารายการด้วยรหัสนักเรียน กรุณาให้ผู้ดูแลรัน migration_backend_hardening.sql เวอร์ชันล่าสุด", "warning");
+        for (const lookupResponse of responses.slice(1)) {
+            if (!lookupResponse?.error) {
+                rows = [...rows, ...(lookupResponse.data || [])];
+            } else {
+                // Older databases can still use browser tokens until migration runs.
+                console.warn("Cross-device registration lookup is unavailable; using saved tokens.", lookupResponse.error);
+                if (lookupResponse.error.code === "42883" || lookupResponse.error.code === "PGRST202") {
+                    showToast("ฐานข้อมูลยังไม่รองรับการค้นหารายการจากเครื่องอื่น กรุณาให้ผู้ดูแลรัน migration_backend_hardening.sql เวอร์ชันล่าสุด", "warning");
+                }
             }
         }
 
@@ -1016,13 +1024,30 @@ window.renderMyRegistrations = renderMyRegistrations;
 async function claimPendingRegistrationsForStudent(studentId) {
     if (!supabaseClient || !studentId) return null;
 
+    let linkedData = null;
+    try {
+        const { data, error } = await supabaseClient.rpc("claim_pending_registrations_by_student_identity", {
+            p_student_id: String(studentId).trim()
+        });
+        if (!error) {
+            linkedData = data;
+            if (data?.linked_count > 0) {
+                showToast(`เชื่อมรายการจองเดิม ${data.linked_count} รายการเข้ากับรหัสนักเรียนแล้ว`, "success");
+            }
+        } else if (error.code !== "42883" && error.code !== "PGRST202") {
+            console.warn("Could not claim pending registrations by student identity:", error);
+        }
+    } catch (error) {
+        console.warn("Could not claim pending registrations by student identity:", error);
+    }
+
     let savedTokens = [];
     try {
         savedTokens = JSON.parse(localStorage.getItem(REGISTRATION_TOKENS_KEY) || "[]");
     } catch (_error) {
         savedTokens = [];
     }
-    if (!Array.isArray(savedTokens) || savedTokens.length === 0) return null;
+    if (!Array.isArray(savedTokens) || savedTokens.length === 0) return linkedData;
 
     try {
         const { data, error } = await supabaseClient.rpc("claim_pending_registrations_by_student", {
@@ -1037,10 +1062,10 @@ async function claimPendingRegistrationsForStudent(studentId) {
             }
             throw error;
         }
-        if (data?.linked_count > 0) {
+        if (data?.linked_count > 0 && !linkedData?.linked_count) {
             showToast(`เชื่อมรายการจองเดิม ${data.linked_count} รายการเข้ากับรหัสนักเรียนแล้ว`, "success");
         }
-        return data;
+        return { ...(linkedData || {}), ...(data || {}), linked_count: (linkedData?.linked_count || 0) + (data?.linked_count || 0) };
     } catch (error) {
         console.warn("Could not claim pending registrations:", error);
         return null;
