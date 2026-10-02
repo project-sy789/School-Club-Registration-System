@@ -912,9 +912,10 @@ BEGIN
         SET enrolled_count = (
             SELECT COUNT(*) FROM registrations r
             WHERE r.club_id = c.id AND r.academic_year = btrim(p_academic_year)
-        );
+        )
+        WHERE c.id IS NOT NULL;
     ELSE
-        UPDATE clubs SET enrolled_count = 0;
+        UPDATE clubs SET enrolled_count = 0 WHERE id IS NOT NULL;
     END IF;
     GET DIAGNOSTICS v_clubs_reset = ROW_COUNT;
 
@@ -1147,7 +1148,8 @@ BEGIN
         WHERE r.club_id = c.id
           AND r.academic_year = v_year
           AND (v_scope = 'academic_year' OR r.semester = v_semester)
-    );
+    )
+    WHERE c.id IS NOT NULL;
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     RETURN jsonb_build_object('success', true, 'clubs_updated', v_updated, 'registration_scope', v_scope);
 END;
@@ -1246,7 +1248,8 @@ BEGIN
         SELECT COUNT(*) FROM registrations r
         WHERE r.club_id = c.id AND r.academic_year = btrim(p_academic_year)
           AND (v_scope = 'academic_year' OR r.semester = btrim(p_semester))
-    );
+    )
+    WHERE c.id IS NOT NULL;
     GET DIAGNOSTICS v_clubs_updated = ROW_COUNT;
     INSERT INTO audit_logs (action, ip_address, user_agent, details)
     VALUES ('ROLLBACK_TO_TERM', left(COALESCE(p_ip_address, 'Unknown IP'), 128),

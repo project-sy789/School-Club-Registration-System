@@ -581,9 +581,10 @@ BEGIN
         SET enrolled_count = (
             SELECT COUNT(*) FROM registrations r
             WHERE r.club_id = c.id AND r.academic_year = TRIM(p_academic_year)
-        );
+        )
+        WHERE c.id IS NOT NULL;
     ELSE
-        UPDATE clubs SET enrolled_count = 0;
+        UPDATE clubs SET enrolled_count = 0 WHERE id IS NOT NULL;
     END IF;
     GET DIAGNOSTICS v_clubs_reset = ROW_COUNT;
 
@@ -951,7 +952,8 @@ BEGIN
         WHERE r.club_id = c.id
           AND r.academic_year = p_academic_year
           AND (v_scope = 'academic_year' OR r.semester = p_semester)
-    ), 0);
+    ), 0)
+    WHERE c.id IS NOT NULL;
     GET DIAGNOSTICS v_clubs_updated = ROW_COUNT;
 
     INSERT INTO audit_logs (action, ip_address, user_agent, details)
