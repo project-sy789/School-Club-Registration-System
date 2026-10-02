@@ -849,6 +849,20 @@ function cancelQuickNewStudent() {
 // 🔓 ยกเลิกการระบุตัวตนของนักเรียน
 function clearStudentVerification() {
     state.currentStudentInfo = null;
+    state.isNewStudentPreRegistering = false;
+    state.myRegistrations = [];
+    state.myRegistrationsLoading = false;
+    state.myRegistrationsIdentity = null;
+    // Registration tokens are private to this browser session. They must not
+    // repopulate the previous student's result after logout.
+    localStorage.removeItem(REGISTRATION_TOKENS_KEY);
+    state.myRegistrationsRequestId += 1;
+
+    const registrationsCard = document.getElementById("my-registrations-card");
+    if (registrationsCard) {
+        registrationsCard.style.display = "none";
+        registrationsCard.innerHTML = "";
+    }
     
     // รีเซ็ตค่าการคัดกรองต่าง ๆ กลับเป็นปกติ
     document.getElementById("filter-grade").value = "all";
