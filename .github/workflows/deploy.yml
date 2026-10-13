@@ -27,14 +27,34 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Inject Supabase Credentials dynamically
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
+          set -euo pipefail
+
+          if [[ -z "$SUPABASE_URL" || -z "$SUPABASE_ANON_KEY" ]]; then
+            echo "::error title=Missing Supabase secrets::Set SUPABASE_URL and SUPABASE_ANON_KEY in GitHub Actions repository secrets."
+            exit 1
+          fi
+
+          if [[ "$SUPABASE_URL" != https://* ]]; then
+            echo "::error title=Invalid SUPABASE_URL::SUPABASE_URL must be the HTTPS Project URL from Supabase Settings > API."
+            exit 1
+          fi
+
+          if [[ "$SUPABASE_ANON_KEY" == sb_secret_* || "$SUPABASE_ANON_KEY" == *service_role* ]]; then
+            echo "::error title=Unsafe Supabase key::SUPABASE_ANON_KEY contains a secret/service_role key. Use the publishable/anon key instead; secret keys must never be deployed to the browser."
+            exit 1
+          fi
+
           cat <<EOF > config.js
           // =====================================================================
           // 🔑 CONFIGURATION FILE - GENERATED AUTOMATICALLY BY GITHUB ACTIONS SECRETS
           // =====================================================================
           const SUPABASE_CONFIG = {
-              SUPABASE_URL: "${{ secrets.SUPABASE_URL }}",
-              SUPABASE_ANON_KEY: "${{ secrets.SUPABASE_ANON_KEY }}"
+              SUPABASE_URL: "$SUPABASE_URL",
+              SUPABASE_ANON_KEY: "$SUPABASE_ANON_KEY"
           };
 
           if (typeof window !== 'undefined') {

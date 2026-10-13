@@ -31,6 +31,11 @@ jobs:
             exit 1
           fi
 
+          if [[ "$SUPABASE_ANON_KEY" == sb_secret_* || "$SUPABASE_ANON_KEY" == *service_role* ]]; then
+            echo "::error title=Unsafe Supabase key::SUPABASE_ANON_KEY contains a secret/service_role key. Use the publishable/anon key instead."
+            exit 1
+          fi
+
           # curl's default retry policy does not retry every transient DNS or
           # connection error. Retry the complete request several times, then
           # provide an actionable message when the hostname itself is missing.
