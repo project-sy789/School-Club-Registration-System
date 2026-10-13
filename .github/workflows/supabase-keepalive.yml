@@ -23,9 +23,35 @@ jobs:
           test -n "$SUPABASE_URL"
           test -n "$SUPABASE_ANON_KEY"
           supabase_url="${SUPABASE_URL%/}"
-          curl --fail --silent --show-error --retry 3 --retry-delay 5 \
-            -X POST "$supabase_url/rest/v1/rpc/healthcheck" \
-            -H "apikey: $SUPABASE_ANON_KEY" \
-            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
-            -H "Content-Type: application/json" \
-            --data '{}'
+          supabase_host="${supabase_url#https://}"
+          supabase_host="${supabase_host%%/*}"
+
+          if [[ "$supabase_url" != https://* ]] || [[ -z "$supabase_host" ]]; then
+            echo "::error title=Invalid SUPABASE_URL::SUPABASE_URL must be the HTTPS Project URL from Supabase Settings > API."
+            exit 1
+          fi
+
+          # curl's default retry policy does not retry every transient DNS or
+          # connection error. Retry the complete request several times, then
+          # provide an actionable message when the hostname itself is missing.
+          for attempt in 1 2 3 4 5 6; do
+            if response=$(curl --fail --silent --show-error \
+              --connect-timeout 10 --max-time 30 --retry 2 --retry-all-errors --retry-delay 5 \
+              -X POST "$supabase_url/rest/v1/rpc/healthcheck" \
+              -H "apikey: $SUPABASE_ANON_KEY" \
+              -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+              -H "Content-Type: application/json" \
+              --data '{}'); then
+              echo "Supabase healthcheck succeeded for $supabase_host: $response"
+              exit 0
+            fi
+            echo "Supabase healthcheck attempt $attempt/6 failed for $supabase_host; retrying..." >&2
+            sleep 10
+          done
+
+          if ! getent ahosts "$supabase_host" >/dev/null 2>&1; then
+            echo "::error title=Supabase hostname not found::DNS cannot resolve $supabase_host. Check that GitHub Actions secret SUPABASE_URL matches the current Supabase Project URL. A paused project normally keeps its hostname; NXDOMAIN usually means the URL is stale, mistyped, or the project was deleted."
+          else
+            echo "::error title=Supabase healthcheck failed::The hostname resolves, but the healthcheck endpoint did not respond successfully. Check Supabase project status and the anon key."
+          fi
+          exit 1
