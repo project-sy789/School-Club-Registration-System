@@ -1483,6 +1483,133 @@ input[type="checkbox"]:checked + .toggle-switch::after {
     margin-bottom: 2rem;
 }
 
+.registration-report-toolbar {
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto;
+    gap: 12px;
+    align-items: end;
+    padding: 14px;
+    margin: 0 0 14px;
+    background: rgba(7, 23, 15, 0.45);
+    border: var(--border-glass-light);
+    border-radius: var(--border-radius-sm);
+}
+
+.registration-report-toolbar .input-group {
+    margin: 0;
+}
+
+.registration-report-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.registration-report-status {
+    min-height: 20px;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    margin-bottom: 8px;
+}
+
+.registration-report-preview {
+    margin-bottom: 1.5rem;
+}
+
+.registration-report-preview .report-summary-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.registration-report-preview .report-summary-card {
+    padding: 12px;
+    background: rgba(7, 23, 15, 0.42);
+    border: var(--border-glass-light);
+    border-radius: var(--border-radius-sm);
+}
+
+.registration-report-preview .report-summary-card strong {
+    display: block;
+    color: var(--accent-mint);
+    font-size: 1.35rem;
+}
+
+.registration-report-preview .report-summary-card span {
+    color: var(--text-muted);
+    font-size: 0.76rem;
+}
+
+.student-history-action .history-action-button {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.registration-history-modal-card {
+    width: min(980px, calc(100vw - 2rem));
+    max-width: 980px;
+}
+
+.registration-history-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: var(--text-secondary);
+    padding: 2rem 0;
+}
+
+.registration-history-empty {
+    text-align: center;
+    color: var(--text-muted);
+    padding: 2rem 0;
+}
+
+.registration-history-empty i {
+    display: block;
+    font-size: 2rem;
+    margin-bottom: 8px;
+    color: var(--accent-mint);
+}
+
+.registration-history-term {
+    margin-top: 1.25rem;
+}
+
+.registration-history-term:first-child {
+    margin-top: 0;
+}
+
+.registration-history-term h4 {
+    color: var(--accent-mint);
+    margin: 0 0 8px;
+}
+
+.registration-history-term h4 span {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    font-weight: 400;
+}
+
+@media (max-width: 768px) {
+    .registration-report-toolbar {
+        grid-template-columns: 1fr;
+    }
+
+    .registration-report-actions {
+        justify-content: stretch;
+    }
+
+    .registration-report-actions button {
+        flex: 1 1 100%;
+    }
+}
+
 .stat-card {
     padding: 1.25rem;
     background: rgba(7, 23, 15, 0.5);

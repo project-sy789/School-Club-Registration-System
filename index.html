@@ -7,7 +7,7 @@
     <meta name="description" content="ระบบสมัครเรียนและลงทะเบียนชุมนุมสำหรับนักเรียนระดับมัธยมศึกษาตอนต้นและตอนปลาย รองรับผู้เข้าใช้งานหนาแน่นอย่างรวดเร็วและปลอดภัย พร้อมระบบสำรองสิทธิ์สำหรับนักเรียนใหม่">
     
     <!-- 🎨 CSS Stylesheets & Icons -->
-    <link rel="stylesheet" href="style.css?v=1.2.2">
+    <link rel="stylesheet" href="style.css?v=1.2.3">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
     <!-- 🚀 External Libraries (Supabase and Confetti) via CDN -->
@@ -87,6 +87,7 @@
                     </button>
                 </div>
                 <div id="my-registrations-card" style="display:none; margin-top: 12px;"></div>
+                <div id="my-registration-history-card" class="student-history-action" style="display:none; margin-top: 12px;"></div>
             </div>
 
         </div>
@@ -269,10 +270,36 @@
                                 <h3>รายงานและสถิติภาพรวม</h3>
                                 <p style="color: var(--text-secondary); font-size: 0.9rem;">ข้อมูลสรุปยอดการรับสมัครและรายชื่อนักเรียนแยกตามชุมนุม</p>
                             </div>
-                            <button class="btn-primary" onclick="exportAllRegistrationsToCSV()">
+                            <button class="btn-primary" onclick="exportRegistrationReportToExcel()">
                                 <i class="fa-solid fa-file-excel"></i> ดาวน์โหลด Excel ทั้งหมด
                             </button>
                         </div>
+
+                        <div class="registration-report-toolbar" aria-label="ตัวเลือกส่งออกรายงาน">
+                            <div class="input-group">
+                                <label for="registration-report-period">ช่วงข้อมูล</label>
+                                <select id="registration-report-period" onchange="loadRegistrationReportPreview()">
+                                    <option value="all">ทุกเทอม / ทุกปีการศึกษา</option>
+                                </select>
+                            </div>
+                            <div class="input-group">
+                                <label for="registration-report-group">จัดกลุ่มรายงาน</label>
+                                <select id="registration-report-group" onchange="loadRegistrationReportPreview()">
+                                    <option value="club">แยกตามชุมนุม</option>
+                                    <option value="grade">แยกตามระดับชั้น</option>
+                                </select>
+                            </div>
+                            <div class="registration-report-actions">
+                                <button class="btn-small-success" type="button" onclick="exportRegistrationReportToExcel()">
+                                    <i class="fa-solid fa-file-excel"></i> Excel สรุป + รายชื่อ
+                                </button>
+                                <button class="btn-secondary" type="button" onclick="exportRegistrationReportToPDF()">
+                                    <i class="fa-solid fa-file-pdf"></i> พิมพ์ / บันทึก PDF
+                                </button>
+                            </div>
+                        </div>
+                        <div id="registration-report-status" class="registration-report-status" role="status"></div>
+                        <div id="registration-report-preview" class="registration-report-preview"></div>
                         
                         <!-- สถิติภาพรวมในบัตร -->
                         <div class="stats-grid">
@@ -779,6 +806,20 @@
         </section>
     </main>
 
+    <!-- 🎟️ Student registration history modal -->
+    <div class="modal-overlay" id="registration-history-modal">
+        <div class="modal-card glass-container registration-history-modal-card">
+            <button class="modal-close" type="button" onclick="closeMyRegistrationHistory()" title="ปิดประวัติการลงทะเบียน">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+            <div class="modal-title"><i class="fa-solid fa-clock-rotate-left"></i> ประวัติการลงทะเบียนของฉัน</div>
+            <div class="modal-subtitle">แสดงเฉพาะรายการที่ผูกกับข้อมูลนักเรียนที่ยืนยันตัวตนไว้</div>
+            <div id="registration-history-content">
+                <div class="registration-history-loading"><i class="fa-solid fa-circle-notch fa-spin"></i> กำลังโหลดประวัติ...</div>
+            </div>
+        </div>
+    </div>
+
     <!-- 📋 3. Dynamic Registration Details Modal (หน้าต่างกรอกฟอร์มลงทะเบียน) -->
     <div class="modal-overlay" id="registration-modal">
         <div class="modal-card glass-container">
@@ -1175,6 +1216,6 @@
     <!-- 💻 6. Javascript Logic Engine -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="config.js?v=1.1.2"></script>
-    <script src="app.js?v=1.2.15"></script>
+    <script src="app.js?v=1.2.16"></script>
 </body>
 </html>

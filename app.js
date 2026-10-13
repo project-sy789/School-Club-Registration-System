@@ -43,6 +43,11 @@ let state = {
     currentClub: null,
     currentStudentInfo: null, // เก็บรายชื่อเด็กดึงจาก DB
     myRegistrations: [], // การลงทะเบียนของนักเรียนที่ระบุตัวตนในเทอมปัจจุบัน
+    registrationHistory: [], // ประวัติการลงทะเบียนของนักเรียนที่ระบุตัวตน
+    registrationHistoryFilter: "__all__",
+    registrationReportRows: [],
+    registrationReportModel: null,
+    registrationReportRequestId: 0,
     isAdminLoggedIn: false,
     activeTab: 'home',
     activeAdminSubTab: 'stats',
@@ -863,6 +868,8 @@ function clearStudentVerification() {
     state.currentStudentInfo = null;
     state.isNewStudentPreRegistering = false;
     state.myRegistrations = [];
+    state.registrationHistory = [];
+    state.registrationHistoryFilter = "__all__";
     state.myRegistrationsLoading = false;
     state.myRegistrationsIdentity = null;
     // Registration tokens are private to this browser session. They must not
@@ -874,6 +881,11 @@ function clearStudentVerification() {
     if (registrationsCard) {
         registrationsCard.style.display = "none";
         registrationsCard.innerHTML = "";
+    }
+    const historyCard = document.getElementById("my-registration-history-card");
+    if (historyCard) {
+        historyCard.style.display = "none";
+        historyCard.innerHTML = "";
     }
     
     // รีเซ็ตค่าการคัดกรองต่าง ๆ กลับเป็นปกติ
@@ -894,6 +906,23 @@ function clearStudentVerification() {
 window.clearStudentVerification = clearStudentVerification;
 window.updateQuickVerifyUI = updateQuickVerifyUI;
 
+function renderMyHistoryAction(visible) {
+    const card = document.getElementById("my-registration-history-card");
+    if (!card) return;
+    if (!visible) {
+        card.style.display = "none";
+        card.innerHTML = "";
+        return;
+    }
+
+    card.innerHTML = `
+        <button type="button" class="btn-secondary history-action-button" onclick="openMyRegistrationHistory()">
+            <i class="fa-solid fa-clock-rotate-left"></i> ประวัติการลงทะเบียนของฉัน
+        </button>
+    `;
+    card.style.display = "block";
+}
+
 // 🎟️ แสดงผลการลงทะเบียนของนักเรียนที่ยืนยันตัวตนแล้ว ใต้การ์ดระบุตัวตนบน hero
 async function renderMyRegistrations() {
     const card = document.getElementById("my-registrations-card");
@@ -910,6 +939,7 @@ async function renderMyRegistrations() {
     state.myRegistrations = [];
     state.myRegistrationsLoading = Boolean(info || savedTokens.length > 0);
     state.myRegistrationsIdentity = identity;
+    renderMyHistoryAction(Boolean(info || savedTokens.length > 0));
 
     if (!info && savedTokens.length === 0) {
         state.myRegistrationsLoading = false;
@@ -1054,9 +1084,102 @@ async function renderMyRegistrations() {
 }
 window.renderMyRegistrations = renderMyRegistrations;
 
+function normalizeRegistrationHistoryRows(rows) {
+    return [...new Map((rows || []).map(reg => [reg.id, {
+        ...reg,
+        clubs: reg.clubs || {
+            name: reg.club_name,
+            teacher: reg.teacher,
+            location: reg.location
+        }
+    }])).values()];
+}
+
+function formatRegistrationTerm(year, semester) {
+    return `ภาคเรียน ${semester}/${year}`;
+}
+
+function renderRegistrationHistoryRows(rows) {
+    if (!rows.length) {
+        return `<div class="registration-history-empty"><i class="fa-regular fa-folder-open"></i><p>ไม่พบประวัติการลงทะเบียน</p></div>`;
+    }
+    const groups = new Map();
+    rows.forEach(reg => {
+        const key = `${reg.academic_year || "-"}|${reg.semester || "-"}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(reg);
+    });
+    return [...groups.entries()].sort(([a], [b]) => b.localeCompare(a)).map(([key, group]) => {
+        const [year, semester] = key.split("|");
+        const items = group.map(reg => {
+            const club = reg.clubs || {};
+            const status = reg.registration_status === "verified" ? "ยืนยันแล้ว" : "สำรองสิทธิ์";
+            const date = reg.created_at ? new Date(reg.created_at).toLocaleDateString("th-TH", { timeZone: "Asia/Bangkok" }) : "-";
+            return `<tr>
+                <td>${escapeHtml(club.name || "ไม่ระบุชุมนุม")}</td>
+                <td>${escapeHtml(club.teacher || "-")}</td>
+                <td>${escapeHtml(reg.level || "-")}</td>
+                <td><span class="ticket-status-badge ${reg.registration_status === "verified" ? "verified" : "pending"}">${status}</span></td>
+                <td>${date}</td>
+                <td><button type="button" class="btn-small" onclick="openRegistrationTicket('${reg.id}')" title="ดูใบยืนยัน"><i class="fa-solid fa-ticket"></i></button></td>
+            </tr>`;
+        }).join("");
+        return `<section class="registration-history-term">
+            <h4>${escapeHtml(formatRegistrationTerm(year, semester))} <span>${group.length} รายการ</span></h4>
+            <div class="search-results-table-container"><table class="data-table"><thead><tr><th>ชุมนุม</th><th>ครูผู้สอน</th><th>ระดับชั้น</th><th>สถานะ</th><th>วันที่สมัคร</th><th></th></tr></thead><tbody>${items}</tbody></table></div>
+        </section>`;
+    }).join("");
+}
+
+async function openMyRegistrationHistory() {
+    const info = state.currentStudentInfo;
+    const identity = info?.student_id && !info.is_pending_reference ? String(info.student_id).trim() : null;
+    const savedTokens = (() => {
+        try { return JSON.parse(localStorage.getItem(REGISTRATION_TOKENS_KEY) || "[]"); } catch (_) { return []; }
+    })();
+    if (!supabaseClient || (!identity && !info?.is_pending_reference && !savedTokens.length)) {
+        showToast("กรุณายืนยันตัวตนนักเรียนก่อนดูประวัติ", "warning");
+        return;
+    }
+
+    const modal = document.getElementById("registration-history-modal");
+    const content = document.getElementById("registration-history-content");
+    modal.classList.add("active");
+    content.innerHTML = `<div class="registration-history-loading"><i class="fa-solid fa-circle-notch fa-spin"></i> กำลังโหลดประวัติ...</div>`;
+    try {
+        const requests = [];
+        if (savedTokens.length) requests.push(supabaseClient.rpc("get_my_registrations", { p_registration_tokens: savedTokens }));
+        if (identity) requests.push(supabaseClient.rpc("get_my_registrations_history_by_student", { p_student_id: identity }));
+        if (info?.is_pending_reference) requests.push(supabaseClient.rpc("get_my_registrations_history_by_pending_reference", {
+            p_reference: String(info.student_id || "").trim(), p_first_name: info.first_name || "", p_last_name: info.last_name || "", p_level: info.level || ""
+        }));
+        const responses = await Promise.all(requests);
+        const unavailable = responses.find(response => response.error && ["42883", "PGRST202"].includes(response.error.code));
+        if (unavailable) throw new Error("ฐานข้อมูลยังไม่รองรับประวัติย้อนหลัง กรุณาให้ผู้ดูแลรัน migration_backend_hardening.sql เวอร์ชันล่าสุด");
+        const rows = normalizeRegistrationHistoryRows(responses.flatMap(response => response.data || []));
+        const expectedName = info ? `${info.first_name || ""}|${info.last_name || ""}`.toLocaleLowerCase() : null;
+        state.registrationHistory = rows.filter(reg => {
+            if (identity && String(reg.student_id || "").trim() === identity) return true;
+            return expectedName && `${reg.first_name || ""}|${reg.last_name || ""}`.toLocaleLowerCase() === expectedName;
+        });
+        content.innerHTML = renderRegistrationHistoryRows(state.registrationHistory);
+    } catch (error) {
+        console.error("Failed to load registration history:", error);
+        content.innerHTML = `<div class="registration-history-empty"><i class="fa-solid fa-triangle-exclamation"></i><p>${escapeHtml(error.message || "โหลดประวัติไม่สำเร็จ")}</p></div>`;
+    }
+}
+
+function closeMyRegistrationHistory() {
+    document.getElementById("registration-history-modal")?.classList.remove("active");
+}
+
+window.openMyRegistrationHistory = openMyRegistrationHistory;
+window.closeMyRegistrationHistory = closeMyRegistrationHistory;
+
 // เปิดใบยืนยันเดิมจากรายการที่โหลดไว้ โดยไม่เปิด flow สมัครซ้ำ
 function openRegistrationTicket(registrationId) {
-    const registration = (state.myRegistrations || []).find(reg => String(reg.id) === String(registrationId));
+    const registration = [...(state.myRegistrations || []), ...(state.registrationHistory || [])]
+        .find(reg => String(reg.id) === String(registrationId));
     if (!registration) {
         showToast("ไม่พบข้อมูลใบยืนยันนี้ กรุณายืนยันตัวตนนักเรียนใหม่อีกครั้ง", "warning");
         return;
@@ -2031,6 +2154,7 @@ async function loadAdminDashboardData() {
         // นำไปเรนเดอร์ย่อยตามแท็บ
         if (state.activeAdminSubTab === 'stats') {
             renderAdminStats();
+            loadRegistrationReportPreview();
         } else if (state.activeAdminSubTab === 'pending') {
             renderAdminPendingStudents();
         } else if (state.activeAdminSubTab === 'clubs') {
@@ -3689,6 +3813,193 @@ function removeSchoolLogo() {
 // ผูกฟังก์ชันเข้ากับ global scope ให้บราวเซอร์เรียกใช้งานผ่าน Event Handler ได้เสมอ
 window.handleLogoUpload = handleLogoUpload;
 window.removeSchoolLogo = removeSchoolLogo;
+
+function registrationReportPeriodLabel(value) {
+    if (!value || value === "all") return "ทุกเทอม / ทุกปีการศึกษา";
+    const [year, semester] = String(value).split("|");
+    return semester === "all" ? `ปีการศึกษา ${year}` : `ภาคเรียน ${semester}/${year}`;
+}
+
+async function fetchAllRegistrationRowsForReport(periodValue) {
+    let query = supabaseClient.from("registrations").select(`
+        id, student_id, prefix, first_name, last_name, level,
+        registration_status, academic_year, semester, created_at, club_id,
+        clubs ( name, teacher, location, capacity )
+    `).order("created_at", { ascending: true });
+    if (periodValue && periodValue !== "all") {
+        const [year, semester] = periodValue.split("|");
+        query = query.eq("academic_year", year);
+        if (semester && semester !== "all") query = query.eq("semester", semester);
+    }
+
+    const rows = [];
+    const pageSize = 1000;
+    for (let from = 0; ; from += pageSize) {
+        const { data, error } = await query.range(from, from + pageSize - 1);
+        if (error) throw error;
+        rows.push(...(data || []));
+        if (!data || data.length < pageSize) break;
+    }
+    return rows;
+}
+
+async function populateRegistrationReportPeriods() {
+    const select = document.getElementById("registration-report-period");
+    if (!select || !supabaseClient || !state.isAdminLoggedIn) return;
+    const previous = select.value || "all";
+    const { data, error } = await supabaseClient.from("registrations").select("academic_year, semester");
+    if (error) throw error;
+
+    const terms = new Set();
+    (data || []).forEach(row => {
+        if (row.academic_year && row.semester) terms.add(`${row.academic_year}|${row.semester}`);
+    });
+    const years = [...new Set([...terms].map(term => term.split("|")[0]))];
+    const options = [
+        `<option value="all">ทุกเทอม / ทุกปีการศึกษา</option>`,
+        ...years.sort((a, b) => b.localeCompare(a)).map(year => `<option value="${escapeHtml(year)}|all">ปีการศึกษา ${escapeHtml(year)}</option>`),
+        ...[...terms].sort((a, b) => b.localeCompare(a)).map(term => {
+            const [year, semester] = term.split("|");
+            return `<option value="${escapeHtml(year)}|${escapeHtml(semester)}">ภาคเรียน ${escapeHtml(semester)}/${escapeHtml(year)}</option>`;
+        })
+    ];
+    select.innerHTML = options.join("");
+    select.value = [...select.options].some(option => option.value === previous) ? previous : "all";
+}
+
+function buildRegistrationReportModel(rows, groupBy, periodValue) {
+    const groups = new Map();
+    rows.forEach(row => {
+        const club = row.clubs || {};
+        const key = groupBy === "grade" ? (row.level || "ไม่ระบุระดับชั้น") : (club.name || "ไม่ระบุชุมนุม");
+        if (!groups.has(key)) groups.set(key, {
+            group: key,
+            teacher: club.teacher || "-",
+            location: club.location || "-",
+            capacity: Number(club.capacity || 0),
+            total: 0,
+            verified: 0,
+            pending: 0
+        });
+        const item = groups.get(key);
+        item.total += 1;
+        if (row.registration_status === "verified") item.verified += 1;
+        else item.pending += 1;
+    });
+
+    const summary = [...groups.values()].sort((a, b) => a.group.localeCompare(b.group, "th"));
+    return {
+        rows,
+        summary,
+        groupBy,
+        periodValue,
+        periodLabel: registrationReportPeriodLabel(periodValue),
+        total: rows.length,
+        verified: rows.filter(row => row.registration_status === "verified").length,
+        pending: rows.filter(row => row.registration_status === "pending").length
+    };
+}
+
+function renderRegistrationReportPreview(model) {
+    const preview = document.getElementById("registration-report-preview");
+    const status = document.getElementById("registration-report-status");
+    if (!preview || !model) return;
+    if (status) status.textContent = `${model.periodLabel} · ${model.groupBy === "grade" ? "แยกตามระดับชั้น" : "แยกตามชุมนุม"} · ${model.total.toLocaleString("th-TH")} รายการ`;
+    const summaryRows = model.summary.map(item => {
+        const capacity = item.capacity ? `${item.total}/${item.capacity}` : item.total;
+        return `<tr><td>${escapeHtml(item.group)}</td><td>${escapeHtml(item.teacher)}</td><td>${escapeHtml(item.location)}</td><td>${capacity}</td><td>${item.verified}</td><td>${item.pending}</td></tr>`;
+    }).join("");
+    preview.innerHTML = `
+        <div class="report-summary-cards">
+            <div class="report-summary-card"><strong>${model.total.toLocaleString("th-TH")}</strong><span>ลงทะเบียนทั้งหมด</span></div>
+            <div class="report-summary-card"><strong>${model.verified.toLocaleString("th-TH")}</strong><span>ยืนยันแล้ว</span></div>
+            <div class="report-summary-card"><strong>${model.pending.toLocaleString("th-TH")}</strong><span>สำรองสิทธิ์</span></div>
+            <div class="report-summary-card"><strong>${model.summary.length.toLocaleString("th-TH")}</strong><span>${model.groupBy === "grade" ? "ระดับชั้น" : "ชุมนุม"}</span></div>
+        </div>
+        <div class="search-results-table-container"><table class="data-table"><thead><tr><th>${model.groupBy === "grade" ? "ระดับชั้น" : "ชุมนุม"}</th><th>ครูผู้สอน</th><th>สถานที่</th><th>จำนวน/โควตา</th><th>ยืนยันแล้ว</th><th>สำรองสิทธิ์</th></tr></thead><tbody>${summaryRows || `<tr><td colspan="6" style="text-align:center; color:var(--text-muted);">ไม่พบข้อมูลในช่วงที่เลือก</td></tr>`}</tbody></table></div>
+    `;
+}
+
+async function loadRegistrationReportPreview() {
+    if (!supabaseClient || !state.isAdminLoggedIn) return;
+    const requestId = ++state.registrationReportRequestId;
+    state.registrationReportModel = null;
+    const periodSelect = document.getElementById("registration-report-period");
+    const groupSelect = document.getElementById("registration-report-group");
+    const status = document.getElementById("registration-report-status");
+    try {
+        await populateRegistrationReportPeriods();
+        const periodValue = periodSelect?.value || "all";
+        const groupBy = groupSelect?.value === "grade" ? "grade" : "club";
+        if (status) status.textContent = "กำลังโหลดข้อมูลรายงาน...";
+        const rows = await fetchAllRegistrationRowsForReport(periodValue);
+        if (requestId !== state.registrationReportRequestId) return;
+        const model = buildRegistrationReportModel(rows, groupBy, periodValue);
+        state.registrationReportRows = rows;
+        state.registrationReportModel = model;
+        renderRegistrationReportPreview(model);
+    } catch (error) {
+        console.error("Failed to load registration report:", error);
+        if (status) status.textContent = `โหลดรายงานไม่สำเร็จ: ${error.message || error}`;
+    }
+}
+
+function registrationReportDetailRows(model) {
+    return model.rows.map(row => {
+        const club = row.clubs || {};
+        return [
+            row.academic_year || "-", row.semester || "-", row.student_id || "นักเรียนใหม่",
+            `${row.prefix || ""}${row.first_name || ""} ${row.last_name || ""}`.trim(), row.level || "-",
+            club.name || "ไม่ระบุชุมนุม", club.teacher || "-", club.location || "-",
+            row.registration_status === "verified" ? "ยืนยันแล้ว" : "สำรองสิทธิ์",
+            row.created_at ? new Date(row.created_at).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" }) : "-"
+        ];
+    });
+}
+
+async function ensureRegistrationReportModel() {
+    if (!state.registrationReportModel) await loadRegistrationReportPreview();
+    return state.registrationReportModel;
+}
+
+async function exportRegistrationReportToExcel() {
+    if (typeof XLSX === "undefined") {
+        showToast("ไม่พบไลบรารี Excel (SheetJS)", "error");
+        return;
+    }
+    try {
+        const model = await ensureRegistrationReportModel();
+        if (!model) return;
+        const workbook = XLSX.utils.book_new();
+        const summaryData = [["รายงานสรุปการลงทะเบียนชุมนุม"], [model.periodLabel], [model.groupBy === "grade" ? "จัดกลุ่มตามระดับชั้น" : "จัดกลุ่มตามชุมนุม"], [], [model.groupBy === "grade" ? "ระดับชั้น" : "ชุมนุม", "ครูผู้สอน", "สถานที่", "จำนวน/โควตา", "ยืนยันแล้ว", "สำรองสิทธิ์"], ...model.summary.map(item => [item.group, item.teacher, item.location, item.capacity ? `${item.total}/${item.capacity}` : item.total, item.verified, item.pending])];
+        XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(summaryData), "สรุป");
+        const details = [["ปีการศึกษา", "ภาคเรียน", "รหัสนักเรียน", "ชื่อ-นามสกุล", "ระดับชั้น", "ชุมนุม", "ครูผู้สอน", "สถานที่", "สถานะ", "วันเวลาลงทะเบียน"], ...registrationReportDetailRows(model)];
+        XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(details), "รายชื่อ");
+        const safePeriod = model.periodValue === "all" ? "ทั้งหมด" : model.periodValue.replace("|", "-");
+        XLSX.writeFile(workbook, `รายงานลงทะเบียนชุมนุม_${safePeriod}.xlsx`);
+        showToast("ส่งออก Excel รายงานสรุปและรายชื่อสำเร็จ", "success");
+    } catch (error) {
+        showToast(`ส่งออก Excel ไม่สำเร็จ: ${error.message || error}`, "error");
+    }
+}
+
+async function exportRegistrationReportToPDF() {
+    const model = await ensureRegistrationReportModel();
+    if (!model) return;
+    const detailRows = registrationReportDetailRows(model).map(row => `<tr>${row.map(cell => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("");
+    const summaryRows = model.summary.map(item => `<tr><td>${escapeHtml(item.group)}</td><td>${escapeHtml(item.teacher)}</td><td>${escapeHtml(item.location)}</td><td>${item.total}${item.capacity ? `/${item.capacity}` : ""}</td><td>${item.verified}</td><td>${item.pending}</td></tr>`).join("");
+    const printWindow = window.open("", "_blank", "noopener,noreferrer");
+    if (!printWindow) {
+        showToast("เบราว์เซอร์บล็อกหน้าต่างพิมพ์ กรุณาอนุญาต pop-up แล้วลองใหม่", "warning");
+        return;
+    }
+    printWindow.document.write(`<!doctype html><html lang="th"><head><meta charset="utf-8"><title>รายงานลงทะเบียนชุมนุม</title><style>body{font-family:Arial,'Noto Sans Thai',sans-serif;color:#17221c;margin:24px}h1{margin:0 0 6px;color:#047857}h2{margin:22px 0 8px;color:#065f46}p{margin:4px 0;color:#475569}.stats{display:flex;gap:10px;margin:16px 0}.stat{border:1px solid #cbd5e1;border-radius:6px;padding:10px;min-width:130px}.stat strong{display:block;font-size:20px;color:#047857}table{width:100%;border-collapse:collapse;margin-top:8px;font-size:11px}th{background:#d1fae5;color:#064e3b}th,td{border:1px solid #cbd5e1;padding:6px;text-align:left}@media print{button{display:none}.page-break{page-break-before:always}}</style></head><body><h1>รายงานสรุปการลงทะเบียนชุมนุม</h1><p>${escapeHtml(model.periodLabel)} · ${model.groupBy === "grade" ? "แยกตามระดับชั้น" : "แยกตามชุมนุม"}</p><div class="stats"><div class="stat"><strong>${model.total}</strong>ลงทะเบียนทั้งหมด</div><div class="stat"><strong>${model.verified}</strong>ยืนยันแล้ว</div><div class="stat"><strong>${model.pending}</strong>สำรองสิทธิ์</div></div><h2>สรุป</h2><table><thead><tr><th>${model.groupBy === "grade" ? "ระดับชั้น" : "ชุมนุม"}</th><th>ครูผู้สอน</th><th>สถานที่</th><th>จำนวน/โควตา</th><th>ยืนยันแล้ว</th><th>สำรองสิทธิ์</th></tr></thead><tbody>${summaryRows}</tbody></table><h2 class="page-break">รายชื่อผู้ลงทะเบียน</h2><table><thead><tr><th>ปี</th><th>เทอม</th><th>รหัส</th><th>ชื่อ-นามสกุล</th><th>ระดับชั้น</th><th>ชุมนุม</th><th>ครู</th><th>สถานที่</th><th>สถานะ</th><th>วันเวลา</th></tr></thead><tbody>${detailRows}</tbody></table><script>window.onload=()=>{window.print();};<\/script></body></html>`);
+    printWindow.document.close();
+}
+
+window.loadRegistrationReportPreview = loadRegistrationReportPreview;
+window.exportRegistrationReportToExcel = exportRegistrationReportToExcel;
+window.exportRegistrationReportToPDF = exportRegistrationReportToPDF;
 
 // =====================================================================
 // 📊 8. EXPORT CSV FOR THAI EXCEL (UTF-8 WITH BOM)

@@ -426,6 +426,47 @@ $$;
 REVOKE ALL ON FUNCTION get_my_registrations_by_student(TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION get_my_registrations_by_student(TEXT) TO anon, authenticated;
 
+-- Student history lookup intentionally omits the current-term filter. It is
+-- still scoped to one verified student identity and never exposes another
+-- student's registrations.
+CREATE OR REPLACE FUNCTION get_my_registrations_history_by_student(p_student_id TEXT)
+RETURNS TABLE (
+    id UUID,
+    registration_token UUID,
+    club_id UUID,
+    student_id TEXT,
+    prefix TEXT,
+    first_name TEXT,
+    last_name TEXT,
+    level TEXT,
+    registration_status TEXT,
+    academic_year TEXT,
+    semester TEXT,
+    created_at TIMESTAMPTZ,
+    club_name TEXT,
+    teacher TEXT,
+    location TEXT
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+    SELECT r.id, r.registration_token, r.club_id, r.student_id,
+           r.prefix, r.first_name, r.last_name, r.level,
+           r.registration_status, r.academic_year, r.semester, r.created_at,
+           c.name, c.teacher, c.location
+    FROM registrations r
+    JOIN clubs c ON c.id = r.club_id
+    JOIN students s ON s.student_id = NULLIF(btrim(p_student_id), '')
+                    AND s.status = 'active'
+    WHERE r.student_id = s.student_id
+    ORDER BY r.academic_year DESC, r.semester DESC, r.created_at DESC;
+$$;
+
+REVOKE ALL ON FUNCTION get_my_registrations_history_by_student(TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION get_my_registrations_history_by_student(TEXT) TO anon, authenticated;
+
 -- A new student can recover a pending reservation from another device with
 -- the same reference, name and class. The raw phone/reference is never stored.
 CREATE OR REPLACE FUNCTION get_my_registrations_by_pending_reference(
@@ -495,6 +536,67 @@ $$;
 
 REVOKE ALL ON FUNCTION get_my_registrations_by_pending_reference(TEXT, TEXT, TEXT, TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION get_my_registrations_by_pending_reference(TEXT, TEXT, TEXT, TEXT) TO anon, authenticated;
+
+-- Pending students can recover their history with the same reference, name and
+-- class used at registration. The reference is HMAC-compared and never read
+-- from a plaintext column.
+CREATE OR REPLACE FUNCTION get_my_registrations_history_by_pending_reference(
+    p_reference TEXT,
+    p_first_name TEXT,
+    p_last_name TEXT,
+    p_level TEXT
+)
+RETURNS TABLE (
+    id UUID,
+    registration_token UUID,
+    club_id UUID,
+    student_id TEXT,
+    prefix TEXT,
+    first_name TEXT,
+    last_name TEXT,
+    level TEXT,
+    registration_status TEXT,
+    academic_year TEXT,
+    semester TEXT,
+    created_at TIMESTAMPTZ,
+    club_name TEXT,
+    teacher TEXT,
+    location TEXT
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, extensions, private, pg_temp
+AS $$
+    SELECT r.id, r.registration_token, r.club_id, r.student_id,
+           r.prefix, r.first_name, r.last_name, r.level,
+           r.registration_status, r.academic_year, r.semester, r.created_at,
+           c.name, c.teacher, c.location
+    FROM registrations r
+    JOIN clubs c ON c.id = r.club_id
+    CROSS JOIN LATERAL (
+        SELECT secret
+        FROM private.registration_secrets
+        WHERE name = 'pending_phone_hmac'
+        LIMIT 1
+    ) secret_row
+    WHERE r.pending_contact_hash = encode(hmac(
+              convert_to(
+                  NULLIF(btrim(p_reference), '') || ':' ||
+                  lower(btrim(p_first_name)) || ':' ||
+                  lower(btrim(p_last_name)) || ':' ||
+                  lower(btrim(p_level)),
+                  'UTF8'
+              ),
+              secret_row.secret,
+              'sha256'
+          ), 'hex')
+      AND r.registration_status = 'pending'
+    ORDER BY r.academic_year DESC, r.semester DESC, r.created_at DESC;
+$$;
+
+REVOKE ALL ON FUNCTION get_my_registrations_history_by_pending_reference(TEXT, TEXT, TEXT, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION get_my_registrations_history_by_pending_reference(TEXT, TEXT, TEXT, TEXT) TO anon, authenticated;
 
 -- When a new student later receives a real school ID, link reservations made
 -- in the same browser instead of leaving a duplicate pending row behind.
