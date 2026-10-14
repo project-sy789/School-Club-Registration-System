@@ -1873,4 +1873,141 @@ $$;
 REVOKE ALL ON FUNCTION rollback_to_term(TEXT, TEXT, TEXT, TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION rollback_to_term(TEXT, TEXT, TEXT, TEXT) TO authenticated;
 
+-- =====================================================================
+-- ADMIN DEMO DATA TOOLS
+-- =====================================================================
+-- These functions are deliberately admin-only and require typed confirmation
+-- in the UI. They preserve Auth/admin_users and the database schema.
+CREATE OR REPLACE FUNCTION admin_clear_registration_data(p_confirmation TEXT)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_deleted INT;
+    v_updated INT;
+BEGIN
+    IF NOT is_admin() THEN
+        RETURN jsonb_build_object('success', false, 'code', 'FORBIDDEN', 'message', 'ไม่มีสิทธิ์ผู้ดูแลระบบ');
+    END IF;
+    IF p_confirmation <> 'CLEAR REGISTRATIONS' THEN
+        RETURN jsonb_build_object('success', false, 'code', 'CONFIRMATION_REQUIRED', 'message', 'คำยืนยันไม่ถูกต้อง');
+    END IF;
+
+    SELECT COUNT(*) INTO v_deleted FROM registrations;
+    TRUNCATE TABLE registrations, audit_logs RESTART IDENTITY;
+    UPDATE clubs SET enrolled_count = 0;
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    INSERT INTO audit_logs (action, details)
+    VALUES ('REGISTRATION_DATA_CLEARED', 'ล้างรายการลงทะเบียนสำหรับเริ่มรอบใหม่: ' || v_deleted || ' รายการ');
+
+    RETURN jsonb_build_object('success', true, 'registrations_deleted', v_deleted, 'clubs_updated', v_updated);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION admin_reset_demo_data(p_confirmation TEXT)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_clubs INT;
+    v_students INT;
+    v_registrations INT;
+BEGIN
+    IF NOT is_admin() THEN
+        RETURN jsonb_build_object('success', false, 'code', 'FORBIDDEN', 'message', 'ไม่มีสิทธิ์ผู้ดูแลระบบ');
+    END IF;
+    IF p_confirmation <> 'RESET DEMO DATA' THEN
+        RETURN jsonb_build_object('success', false, 'code', 'CONFIRMATION_REQUIRED', 'message', 'คำยืนยันไม่ถูกต้อง');
+    END IF;
+
+    TRUNCATE TABLE registrations, audit_logs, students, clubs RESTART IDENTITY CASCADE;
+
+    INSERT INTO settings (key, value, updated_at)
+    VALUES
+    ('school_config', '{
+        "school_name": "โรงเรียนสาธิตตัวอย่าง",
+        "academic_year": "2569",
+        "semester": "1",
+        "registration_scope": "semester",
+        "allow_student_cancellation": true,
+        "logo_base64": null
+    }'::jsonb, now()),
+    ('registration_period', jsonb_build_object(
+        'is_active', true,
+        'start_time', now() - interval '1 day',
+        'end_time', now() + interval '30 days'
+    ), now())
+    ON CONFLICT (key) DO UPDATE
+    SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at;
+
+    INSERT INTO clubs (name, teacher, location, description, grades, capacity) VALUES
+    ('ชุมนุมคอมพิวเตอร์และวิทยาการคำนวณ', 'ครูสมเจตน์ เจริญดี', 'ห้องปฏิบัติการคอมพิวเตอร์ 3', 'เรียนรู้การเขียนโปรแกรมและการสร้างนวัตกรรมดิจิทัล', ARRAY['ม.1','ม.2','ม.3','ม.4','ม.5','ม.6'], 45),
+    ('ชุมนุมดนตรีสากลและวงสตริง', 'ครูอภิสิทธิ์ พิณทอง', 'ห้องดนตรีสากล อาคาร 3', 'ฝึกเล่นดนตรีและซ้อมวงสำหรับกิจกรรมโรงเรียน', ARRAY['ม.1','ม.2','ม.3','ม.4','ม.5','ม.6'], 25),
+    ('ชุมนุมศิลปะสร้างสรรค์และการออกแบบ', 'ครูภัทรา วรรณดี', 'ห้องศิลปะ 1 อาคาร 4', 'ฝึกวาดภาพ ออกแบบกราฟิก และงานศิลปะร่วมสมัย', ARRAY['ม.1','ม.2','ม.3','ม.4','ม.5','ม.6'], 30),
+    ('ชุมนุมการโต้วาทีและผู้นำยุคใหม่', 'ครูวรรณวิสา เลิศใจ', 'ห้องประชุมย่อย อาคาร 1', 'พัฒนาทักษะการพูด การคิดวิเคราะห์ และการเจรจา', ARRAY['ม.4','ม.5','ม.6'], 20),
+    ('ชุมนุมอนุรักษ์ธรรมชาติและสิ่งแวดล้อม', 'ครูสุชาติ รักษ์ไทย', 'สวนพฤกษศาสตร์หลังโรงเรียน', 'กิจกรรมดูแลสิ่งแวดล้อมและศึกษาระบบนิเวศ', ARRAY['ม.1','ม.2','ม.3'], 35),
+    ('ชุมนุมกีฬาบาสเกตบอลเพื่อความเป็นเลิศ', 'ครูวิทยา พละเลิศ', 'โรงยิมเนเซียม 2', 'ฝึกทักษะกีฬาและการเล่นเป็นทีม', ARRAY['ม.1','ม.2','ม.3','ม.4','ม.5','ม.6'], 40),
+    ('ชุมนุมภาษาอังกฤษเพื่อการสื่อสาร', 'Mr. David Smith', 'ห้อง Sound Lab 2', 'ฝึกภาษาอังกฤษผ่านบทบาทสมมติและการนำเสนอ', ARRAY['ม.4','ม.5','ม.6'], 30),
+    ('ชุมนุมอาหารไทยและเบเกอรี่เบื้องต้น', 'ครูสุมาลี ครัวไทย', 'ห้องคหกรรม อาคาร 2', 'ฝึกทำอาหารไทยและเบเกอรี่เบื้องต้น', ARRAY['ม.1','ม.2','ม.3','ม.4','ม.5','ม.6'], 20);
+
+    INSERT INTO students (student_id, prefix, first_name, last_name, level) VALUES
+    ('10001', 'นาย', 'กิตติพงศ์', 'ทองดี', 'ม.4/1'),
+    ('10002', 'นางสาว', 'ณัฏฐณิชา', 'จิตอารีย์', 'ม.4/1'),
+    ('10003', 'นาย', 'ธนพล', 'ปัญญาแก้ว', 'ม.4/2'),
+    ('10004', 'นางสาว', 'สุภัสสรา', 'อินทร์จันทร์', 'ม.4/2'),
+    ('10005', 'นาย', 'ปกรณ์', 'มีชัย', 'ม.5/1'),
+    ('10006', 'นางสาว', 'วรัญญา', 'ศรีสุข', 'ม.5/1'),
+    ('10007', 'นาย', 'จิรเดช', 'สมบูรณ์', 'ม.5/2'),
+    ('10008', 'นางสาว', 'นัทธ์ชนัน', 'แสงอรุณ', 'ม.5/2'),
+    ('10009', 'นาย', 'ปรเมศวร์', 'อุดมผล', 'ม.6/1'),
+    ('10010', 'นางสาว', 'อภิชญา', 'สิริกุล', 'ม.6/1'),
+    ('10011', 'เด็กชาย', 'ศุภโชค', 'ใจดี', 'ม.1/1'),
+    ('10012', 'เด็กหญิง', 'อนัญญา', 'รักษาสัตย์', 'ม.1/1'),
+    ('10013', 'เด็กชาย', 'ธนภัทร', 'แก้วตา', 'ม.2/1'),
+    ('10014', 'เด็กหญิง', 'ชลิดา', 'เดชรุ่ง', 'ม.2/1'),
+    ('10015', 'เด็กชาย', 'พีรพล', 'คงกระพัน', 'ม.3/1'),
+    ('10016', 'เด็กหญิง', 'กนกวรรณ', 'สิริเวช', 'ม.3/2');
+
+    WITH demo_registrations(student_id, club_name) AS (
+        VALUES
+            ('10001', 'ชุมนุมคอมพิวเตอร์และวิทยาการคำนวณ'), ('10002', 'ชุมนุมดนตรีสากลและวงสตริง'),
+            ('10003', 'ชุมนุมศิลปะสร้างสรรค์และการออกแบบ'), ('10004', 'ชุมนุมคอมพิวเตอร์และวิทยาการคำนวณ'),
+            ('10005', 'ชุมนุมการโต้วาทีและผู้นำยุคใหม่'), ('10006', 'ชุมนุมภาษาอังกฤษเพื่อการสื่อสาร'),
+            ('10007', 'ชุมนุมดนตรีสากลและวงสตริง'), ('10008', 'ชุมนุมศิลปะสร้างสรรค์และการออกแบบ'),
+            ('10009', 'ชุมนุมการโต้วาทีและผู้นำยุคใหม่'), ('10010', 'ชุมนุมภาษาอังกฤษเพื่อการสื่อสาร'),
+            ('10011', 'ชุมนุมกีฬาบาสเกตบอลเพื่อความเป็นเลิศ'), ('10012', 'ชุมนุมอาหารไทยและเบเกอรี่เบื้องต้น'),
+            ('10013', 'ชุมนุมอนุรักษ์ธรรมชาติและสิ่งแวดล้อม'), ('10014', 'ชุมนุมคอมพิวเตอร์และวิทยาการคำนวณ'),
+            ('10015', 'ชุมนุมกีฬาบาสเกตบอลเพื่อความเป็นเลิศ'), ('10016', 'ชุมนุมอาหารไทยและเบเกอรี่เบื้องต้น')
+    ), selected AS (
+        SELECT c.id AS club_id, s.student_id, s.prefix, s.first_name, s.last_name, s.level
+        FROM demo_registrations d
+        JOIN students s ON s.student_id = d.student_id
+        JOIN clubs c ON c.name = d.club_name
+    )
+    INSERT INTO registrations (club_id, student_id, prefix, first_name, last_name, level, registration_status, academic_year, semester)
+    SELECT club_id, student_id, prefix, first_name, last_name, level, 'verified', '2569', '1'
+    FROM selected;
+
+    UPDATE clubs c
+    SET enrolled_count = (SELECT COUNT(*) FROM registrations r WHERE r.club_id = c.id AND r.academic_year = '2569' AND r.semester = '1');
+
+    SELECT COUNT(*) INTO v_clubs FROM clubs;
+    SELECT COUNT(*) INTO v_students FROM students;
+    SELECT COUNT(*) INTO v_registrations FROM registrations;
+    INSERT INTO audit_logs (action, details)
+    VALUES ('DEMO_DATA_RESET', 'โหลดข้อมูลสาธิตใหม่: ' || v_clubs || ' ชุมนุม, ' || v_students || ' นักเรียน, ' || v_registrations || ' รายการสมัคร');
+
+    RETURN jsonb_build_object('success', true, 'clubs', v_clubs, 'students', v_students, 'registrations', v_registrations);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION admin_clear_registration_data(TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION admin_reset_demo_data(TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION admin_clear_registration_data(TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION admin_reset_demo_data(TEXT) TO authenticated;
+
 COMMIT;

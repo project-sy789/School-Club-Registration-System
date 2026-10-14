@@ -7,7 +7,7 @@
     <meta name="description" content="ระบบสมัครเรียนและลงทะเบียนชุมนุมสำหรับนักเรียนระดับมัธยมศึกษาตอนต้นและตอนปลาย รองรับผู้เข้าใช้งานหนาแน่นอย่างรวดเร็วและปลอดภัย พร้อมระบบสำรองสิทธิ์สำหรับนักเรียนใหม่">
     
     <!-- 🎨 CSS Stylesheets & Icons -->
-    <link rel="stylesheet" href="style.css?v=1.2.3">
+    <link rel="stylesheet" href="style.css?v=1.2.4">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
     <!-- 🚀 External Libraries (Supabase and Confetti) via CDN -->
@@ -661,6 +661,23 @@
                             </div>
                         </div>
 
+                        <!-- 🧪 เครื่องมือข้อมูลสาธิต -->
+                        <div class="admin-card demo-data-tools-card">
+                            <h3><i class="fa-solid fa-flask" style="color: #fbbf24;"></i> เครื่องมือข้อมูลสาธิต</h3>
+                            <p>
+                                ใช้สำหรับเว็บ Demo หรือฐานข้อมูลทดสอบเท่านั้น ปุ่มโหลด Demo ใหม่จะล้างชุมนุม นักเรียน รายการสมัคร และประวัติ audit เดิมทั้งหมด
+                                แต่ไม่ลบบัญชีผู้ดูแลหรือโครงสร้างฐานข้อมูล
+                            </p>
+                            <div class="demo-data-tools-actions">
+                                <button class="btn-danger" type="button" onclick="resetDemoData()">
+                                    <i class="fa-solid fa-flask-vial"></i> โหลดข้อมูล Demo ใหม่ทั้งหมด
+                                </button>
+                                <button class="btn-secondary" type="button" onclick="clearRegistrationData()">
+                                    <i class="fa-solid fa-broom"></i> ล้างเฉพาะรายการลงทะเบียน
+                                </button>
+                            </div>
+                        </div>
+
                         <!-- 🎓 จัดการข้อมูลศิษย์เก่า (PDPA) -->
                         <div class="admin-card" style="margin-top: 1.5rem;">
                             <h3 style="margin-bottom: 0.5rem;">
@@ -1216,6 +1233,6 @@
     <!-- 💻 6. Javascript Logic Engine -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="config.js?v=1.1.2"></script>
-    <script src="app.js?v=1.2.16"></script>
+    <script src="app.js?v=1.2.17"></script>
 </body>
 </html>

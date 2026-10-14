@@ -1596,6 +1596,30 @@ input[type="checkbox"]:checked + .toggle-switch::after {
     font-weight: 400;
 }
 
+.demo-data-tools-card {
+    margin-top: 1.5rem;
+    border: 1px solid rgba(251, 191, 36, 0.3);
+    background: rgba(40, 28, 0, 0.28);
+}
+
+.demo-data-tools-card h3 {
+    margin-bottom: 0.5rem;
+    color: #fbbf24;
+}
+
+.demo-data-tools-card p {
+    color: var(--text-secondary);
+    font-size: 0.88rem;
+    line-height: 1.55;
+    margin: 0 0 1rem;
+}
+
+.demo-data-tools-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
 @media (max-width: 768px) {
     .registration-report-toolbar {
         grid-template-columns: 1fr;

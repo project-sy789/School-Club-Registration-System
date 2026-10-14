@@ -4764,8 +4764,69 @@ async function startNewTerm() {
     }
 }
 
+async function refreshAfterAdminDataReset() {
+    await loadSystemSettings();
+    await loadClubsData();
+    await loadAdminDashboardData();
+    if (typeof loadStudentsList === "function") await loadStudentsList();
+}
+
+async function clearRegistrationData() {
+    if (!supabaseClient || !state.isAdminLoggedIn) return;
+    const confirmation = prompt(
+        "การกระทำนี้จะลบรายการลงทะเบียนและ audit log ทั้งหมด แต่เก็บชุมนุม/นักเรียนไว้\n\nพิมพ์ CLEAR REGISTRATIONS เพื่อยืนยัน:",
+        ""
+    );
+    if (confirmation === null) return;
+    if (confirmation.trim() !== "CLEAR REGISTRATIONS") {
+        showToast("ยกเลิก: คำยืนยันไม่ถูกต้อง", "warning");
+        return;
+    }
+
+    try {
+        const { data, error } = await supabaseClient.rpc("admin_clear_registration_data", {
+            p_confirmation: confirmation.trim()
+        });
+        if (error) throw error;
+        if (!data?.success) throw new Error(data?.message || "ล้างรายการลงทะเบียนไม่สำเร็จ");
+        showToast(`ล้างรายการลงทะเบียน ${data.registrations_deleted || 0} รายการแล้ว`, "success");
+        await refreshAfterAdminDataReset();
+    } catch (error) {
+        console.error("clearRegistrationData error:", error);
+        showToast(`ล้างรายการไม่สำเร็จ: ${error.message || error} (ตรวจว่าได้รัน migration ล่าสุดแล้ว)`, "error");
+    }
+}
+
+async function resetDemoData() {
+    if (!supabaseClient || !state.isAdminLoggedIn) return;
+    const confirmation = prompt(
+        "คำเตือน: จะล้างชุมนุม นักเรียน รายการสมัคร และ audit log เดิมทั้งหมด\nจะไม่ลบบัญชีผู้ดูแลหรือโครงสร้างฐานข้อมูล\n\nพิมพ์ RESET DEMO DATA เพื่อยืนยัน:",
+        ""
+    );
+    if (confirmation === null) return;
+    if (confirmation.trim() !== "RESET DEMO DATA") {
+        showToast("ยกเลิก: คำยืนยันไม่ถูกต้อง", "warning");
+        return;
+    }
+
+    try {
+        const { data, error } = await supabaseClient.rpc("admin_reset_demo_data", {
+            p_confirmation: confirmation.trim()
+        });
+        if (error) throw error;
+        if (!data?.success) throw new Error(data?.message || "โหลดข้อมูล Demo ไม่สำเร็จ");
+        showToast(`โหลด Demo แล้ว: ${data.clubs || 0} ชุมนุม, ${data.students || 0} นักเรียน, ${data.registrations || 0} รายการ`, "success");
+        await refreshAfterAdminDataReset();
+    } catch (error) {
+        console.error("resetDemoData error:", error);
+        showToast(`โหลด Demo ไม่สำเร็จ: ${error.message || error} (ตรวจว่าได้รัน migration ล่าสุดแล้ว)`, "error");
+    }
+}
+
 window.promoteAllStudents = promoteAllStudents;
 window.startNewTerm = startNewTerm;
+window.clearRegistrationData = clearRegistrationData;
+window.resetDemoData = resetDemoData;
 
 // ────────────────────────────────────────────────────────────────────
 // ⏪ ย้อนกลับเทอม — เรียก RPC list_archived_terms + rollback_to_term
