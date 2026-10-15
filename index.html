@@ -7,7 +7,7 @@
     <meta name="description" content="ระบบสมัครเรียนและลงทะเบียนชุมนุมสำหรับนักเรียนระดับมัธยมศึกษาตอนต้นและตอนปลาย รองรับผู้เข้าใช้งานหนาแน่นอย่างรวดเร็วและปลอดภัย พร้อมระบบสำรองสิทธิ์สำหรับนักเรียนใหม่">
     
     <!-- 🎨 CSS Stylesheets & Icons -->
-    <link rel="stylesheet" href="style.css?v=1.2.4">
+    <link rel="stylesheet" href="style.css?v=1.2.5">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
     <!-- 🚀 External Libraries (Supabase and Confetti) via CDN -->
@@ -454,7 +454,7 @@
                             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom: 0.75rem;">
                                 <h4 style="margin: 0;"><i class="fa-solid fa-database" style="color: var(--accent-mint);"></i> ฐานข้อมูลนักเรียนปัจจุบัน</h4>
                                 <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                                    <button class="btn-small-success" style="padding: 7px 14px; font-size: 0.85rem;" onclick="exportUnregisteredStudentsToCSV()" title="ส่งออกรายชื่อนักเรียนที่ยังไม่ได้ลงทะเบียนชุมนุมในเทอมปัจจุบัน">
+                                    <button class="btn-small-success" style="padding: 7px 14px; font-size: 0.85rem;" onclick="exportUnregisteredStudentsToCSV()" title="ส่งออกรายชื่อนักเรียนที่ยังไม่ได้ลงทะเบียนตามช่วงเวลาที่เลือก">
                                         <i class="fa-solid fa-file-csv"></i> ส่งออกรายชื่อยังไม่ลงทะเบียน
                                     </button>
                                     <button class="btn-primary" style="padding: 7px 14px; font-size: 0.85rem;" onclick="openStudentCreateModal()">
@@ -465,6 +465,13 @@
 
                             <!-- 🔍 ส่วนตัวกรองฐานข้อมูลนักเรียน -->
                             <div style="display: flex; gap: 12px; margin-bottom: 15px; flex-wrap: wrap; align-items: center;">
+                                <div class="input-group" style="min-width: 235px; flex: 0 1 250px;">
+                                    <label for="admin-student-term-filter" style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 4px;">ช่วงข้อมูลการลงทะเบียน</label>
+                                    <select id="admin-student-term-filter" onchange="filterAdminStudentsList()"
+                                            style="background: #0d281a; border: var(--border-glass); color: var(--text-primary); padding: 8px 12px; border-radius: 6px; font-size: 0.9rem; width: 100%; height: 38px;">
+                                        <option value="__current__" style="background: #0d281a; color: var(--text-primary);">รอบปัจจุบัน</option>
+                                    </select>
+                                </div>
                                 <div style="flex: 1; min-width: 250px; position: relative;">
                                     <input type="text" id="admin-student-search-input" placeholder="ค้นหารหัสประจำตัว หรือชื่อ-นามสกุล..."
                                            onkeyup="filterAdminStudentsList()"
@@ -477,12 +484,15 @@
                                 </select>
                                 <select id="admin-student-reg-filter" onchange="filterAdminStudentsList()"
                                         style="background: #0d281a; border: var(--border-glass); color: var(--text-primary); padding: 8px 12px; border-radius: 6px; font-size: 0.9rem; width: 200px; height: 38px;"
-                                        title="กรองตามสถานะการลงทะเบียนชุมนุมในเทอมปัจจุบัน">
+                                        title="กรองตามสถานะการลงทะเบียนในช่วงเวลาที่เลือก">
                                     <option value="all" style="background: #0d281a; color: var(--text-primary);">-- สถานะทั้งหมด --</option>
                                     <option value="registered" style="background: #0d281a; color: var(--text-primary);">✅ ลงทะเบียนแล้ว</option>
                                     <option value="not_registered" style="background: #0d281a; color: var(--text-primary);">⚠️ ยังไม่ลงทะเบียน</option>
                                 </select>
                             </div>
+                            <p id="admin-student-term-caption" style="color: var(--text-secondary); font-size: 0.8rem; margin: -4px 0 12px;">
+                                กำลังเตรียมช่วงข้อมูลการลงทะเบียน...
+                            </p>
 
                             <div class="search-results-table-container" style="max-height: 350px; overflow-y: auto;">
                                 <table class="data-table">
@@ -1233,6 +1243,6 @@
     <!-- 💻 6. Javascript Logic Engine -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="config.js?v=1.1.2"></script>
-    <script src="app.js?v=1.2.17"></script>
+    <script src="app.js?v=1.2.18"></script>
 </body>
 </html>

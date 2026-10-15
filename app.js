@@ -2160,6 +2160,7 @@ async function loadAdminDashboardData() {
         } else if (state.activeAdminSubTab === 'clubs') {
             renderAdminManageClubs();
         } else if (state.activeAdminSubTab === 'students') {
+            await populateStudentTermFilter(true);
             loadStudentsList();
         } else if (state.activeAdminSubTab === 'settings') {
             renderAdminSettings();
@@ -2676,6 +2677,137 @@ function resetLevelInput() {
 
 // 👥 ดึงรายชื่อนักเรียนที่มีในระบบ (สำหรับ bulk import และแสดงฐานข้อมูลนักเรียน)
 let hasPopulatedStudentLevels = false;
+function getStudentTermFilterValue() {
+    return document.getElementById("admin-student-term-filter")?.value || "__current__";
+}
+
+function getStudentTermFilterLabel(value) {
+    if (!value || value === "__current__") {
+        const { academic_year, semester } = getCurrentTerm();
+        return getRegistrationScope() === "academic_year"
+            ? `ปีการศึกษาปัจจุบัน (${academic_year})`
+            : `ภาคเรียนปัจจุบัน (${semester}/${academic_year})`;
+    }
+    if (value === "__all__") return "ทุกเทอม / ทุกปีการศึกษา";
+    return registrationReportPeriodLabel(value);
+}
+
+function getStudentTermFileLabel(value) {
+    return getStudentTermFilterLabel(value)
+        .replace(/ทุกเทอม \/ ทุกปีการศึกษา/g, "ทั้งหมด")
+        .replace(/ปีการศึกษาปัจจุบัน \(([^)]+)\)/, "ปีการศึกษา-$1")
+        .replace(/ภาคเรียนปัจจุบัน \(([^)]+)\)/, "ภาคเรียน-$1")
+        .replace(/ปีการศึกษา\s+/g, "ปี-")
+        .replace(/ภาคเรียน\s+/g, "เทอม-")
+        .replace(/[\\/:*?"<>|\s]+/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-|-$/g, "");
+}
+
+function applyStudentTermFilter(query, value = getStudentTermFilterValue()) {
+    if (value === "__all__") return query;
+    if (value === "__current__") {
+        const { academic_year, semester } = getCurrentTerm();
+        query = query.eq("academic_year", academic_year);
+        return getRegistrationScope() === "academic_year" ? query : query.eq("semester", semester);
+    }
+    const [year, semester] = String(value).split("|");
+    if (!year) return query;
+    query = query.eq("academic_year", year);
+    return semester && semester !== "all" ? query.eq("semester", semester) : query;
+}
+
+async function populateStudentTermFilter(force = false) {
+    const select = document.getElementById("admin-student-term-filter");
+    if (!select || !supabaseClient || !state.isAdminLoggedIn) return;
+
+    const { academic_year, semester } = getCurrentTerm();
+    const currentKey = `${academic_year}|${semester}|${getRegistrationScope()}`;
+    if (!force && select.dataset.loadedKey === currentKey) return;
+    if (select.dataset.loading === "true") return;
+    select.dataset.loading = "true";
+
+    const previousValue = select.value || "__current__";
+    try {
+        const terms = new Set([`${academic_year}|${semester}`]);
+        const pageSize = 1000;
+        for (let from = 0; ; from += pageSize) {
+            const { data, error } = await supabaseClient
+                .from("registrations")
+                .select("academic_year, semester")
+                .range(from, from + pageSize - 1);
+            if (error) throw error;
+            (data || []).forEach(row => {
+                if (row.academic_year && row.semester) terms.add(`${row.academic_year}|${row.semester}`);
+            });
+            if (!data || data.length < pageSize) break;
+        }
+
+        const years = [...new Set([...terms].map(term => term.split("|")[0]))]
+            .sort((a, b) => b.localeCompare(a, "th", { numeric: true }));
+        const sortedTerms = [...terms].sort((a, b) => b.localeCompare(a, "th", { numeric: true }));
+
+        select.innerHTML = "";
+        const currentOption = document.createElement("option");
+        currentOption.value = "__current__";
+        currentOption.textContent = getStudentTermFilterLabel("__current__");
+        select.appendChild(currentOption);
+
+        const allOption = document.createElement("option");
+        allOption.value = "__all__";
+        allOption.textContent = "ทุกเทอม / ทุกปีการศึกษา";
+        select.appendChild(allOption);
+
+        years.forEach(year => {
+            const option = document.createElement("option");
+            option.value = `${year}|all`;
+            option.textContent = `ปีการศึกษา ${year}`;
+            select.appendChild(option);
+        });
+
+        sortedTerms.forEach(term => {
+            const [year, sem] = term.split("|");
+            const option = document.createElement("option");
+            option.value = term;
+            option.textContent = `ภาคเรียน ${sem}/${year}`;
+            select.appendChild(option);
+        });
+
+        select.value = [...select.options].some(option => option.value === previousValue)
+            ? previousValue
+            : "__current__";
+        select.dataset.loadedKey = currentKey;
+    } catch (error) {
+        console.error("Error loading student term filter:", error);
+    } finally {
+        delete select.dataset.loading;
+    }
+}
+
+async function getStudentRegistrationMap(termValue = getStudentTermFilterValue()) {
+    const map = new Map();
+    if (!supabaseClient) return map;
+
+    const pageSize = 1000;
+    let query = supabaseClient
+        .from("registrations")
+        .select("student_id, academic_year, semester, registration_status, created_at, clubs(name)")
+        .order("created_at", { ascending: false });
+    query = applyStudentTermFilter(query, termValue);
+
+    for (let from = 0; ; from += pageSize) {
+        const { data, error } = await query.range(from, from + pageSize - 1);
+        if (error) throw error;
+        (data || []).forEach(registration => {
+            if (!registration.student_id) return;
+            const key = String(registration.student_id);
+            if (!map.has(key)) map.set(key, []);
+            map.get(key).push(registration);
+        });
+        if (!data || data.length < pageSize) break;
+    }
+    return map;
+}
 
 async function populateStudentLevelDropdown() {
     const filterSelect = document.getElementById("admin-student-level-filter");
@@ -2724,6 +2856,12 @@ async function loadStudentsList() {
     const searchVal = document.getElementById("admin-student-search-input")?.value.trim() || "";
     const levelVal = (document.getElementById("admin-student-level-filter")?.value || "").trim();
     const regFilter = (document.getElementById("admin-student-reg-filter")?.value || "all").trim();
+    await populateStudentTermFilter();
+    const termFilter = getStudentTermFilterValue();
+    const termCaption = document.getElementById("admin-student-term-caption");
+    if (termCaption) {
+        termCaption.textContent = `แสดงสถานะการลงทะเบียนของ ${getStudentTermFilterLabel(termFilter)} · ข้อมูลนักเรียนจากฐานข้อมูลปัจจุบัน`;
+    }
 
     try {
         let query = supabaseClient.from("students").select("*");
@@ -2750,8 +2888,8 @@ async function loadStudentsList() {
 
         if (error) throw error;
 
-        // ดึง registrations ของเทอมปัจจุบัน เพื่อแมปสถานะของนักเรียนแต่ละคน
-        const regMap = await getCurrentTermRegistrationMap();
+        // ดึง registrations ตามช่วงเวลาที่ผู้ดูแลเลือก เพื่อแมปสถานะของนักเรียนแต่ละคน
+        const regMap = await getStudentRegistrationMap(termFilter);
 
         let rows = data || [];
         if (regFilter === "registered") {
@@ -2769,12 +2907,21 @@ async function loadStudentsList() {
             rows.forEach(std => {
                 const row = document.createElement("tr");
                 const safeId = String(std.student_id).replace(/'/g, "\\'");
-                const reg = regMap.get(String(std.student_id));
+                const registrations = regMap.get(String(std.student_id)) || [];
                 let statusHtml;
-                if (reg) {
-                    const clubName = reg.club_name || "ไม่ระบุชุมนุม";
-                    const safeClub = clubName.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-                    statusHtml = `<span style="display:inline-block; background:rgba(16,185,129,0.15); color:var(--accent-mint); border:1px solid rgba(16,185,129,0.3); padding:3px 8px; border-radius:10px; font-size:0.78rem; font-weight:600;" title="${safeClub}">✅ ${safeClub}</span>`;
+                if (registrations.length > 0) {
+                    const clubNames = [...new Set(registrations.map(reg => reg.clubs?.name || "ไม่ระบุชุมนุม"))];
+                    const hasVerified = registrations.some(reg => reg.registration_status === "verified");
+                    const statusLabel = hasVerified ? "ลงทะเบียนแล้ว" : "รอตรวจสอบ";
+                    const statusIcon = hasVerified ? "✅" : "⏳";
+                    const summary = clubNames.length === 1
+                        ? `${statusLabel} · ${clubNames[0]}`
+                        : `${statusLabel} (${registrations.length} รายการ)`;
+                    const details = registrations.map(reg => {
+                        const club = reg.clubs?.name || "ไม่ระบุชุมนุม";
+                        return `${club} · ${formatRegistrationTerm(reg.academic_year || "-", reg.semester || "-")}`;
+                    }).join(" | ");
+                    statusHtml = `<span style="display:inline-block; max-width:260px; background:${hasVerified ? "rgba(16,185,129,0.15)" : "rgba(245,158,11,0.15)"}; color:${hasVerified ? "var(--accent-mint)" : "#fbbf24"}; border:1px solid ${hasVerified ? "rgba(16,185,129,0.3)" : "rgba(245,158,11,0.3)"}; padding:3px 8px; border-radius:10px; font-size:0.78rem; font-weight:600; white-space:normal;" title="${escapeHtml(details)}">${statusIcon} ${escapeHtml(summary)}</span>`;
                 } else {
                     statusHtml = `<span style="display:inline-block; background:rgba(245,158,11,0.15); color:#fbbf24; border:1px solid rgba(245,158,11,0.3); padding:3px 8px; border-radius:10px; font-size:0.78rem; font-weight:600;">⚠️ ยังไม่ลงทะเบียน</span>`;
                 }
@@ -2800,9 +2947,9 @@ async function loadStudentsList() {
             });
         } else {
             const emptyMsg = regFilter === "registered"
-                ? "ไม่พบนักเรียนที่ลงทะเบียนชุมนุมในเทอมปัจจุบันตามเงื่อนไขการค้นหา"
+                ? `ไม่พบนักเรียนที่ลงทะเบียนชุมนุมใน${getStudentTermFilterLabel(termFilter)}ตามเงื่อนไขการค้นหา`
                 : regFilter === "not_registered"
-                    ? "ไม่พบนักเรียนที่ยังไม่ลงทะเบียนตามเงื่อนไขการค้นหา"
+                    ? `ไม่พบนักเรียนที่ยังไม่ลงทะเบียนใน${getStudentTermFilterLabel(termFilter)}ตามเงื่อนไขการค้นหา`
                     : "ไม่พบข้อมูลนักเรียนที่ตรงตามเงื่อนไขการค้นหา";
             tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 1.5rem 0;">${emptyMsg}</td></tr>`;
         }
@@ -2815,32 +2962,14 @@ async function loadStudentsList() {
     }
 }
 
-// 🗂️ ดึงการลงทะเบียนของเทอมปัจจุบันมาเป็น Map: student_id -> { club_name }
-// ใช้สำหรับแสดงสถานะ "ลงทะเบียนแล้ว / ยังไม่ลงทะเบียน" บนตารางนักเรียน
+// 🗂️ รักษาชื่อ helper เดิมไว้ให้ส่วนส่งออกที่อาจเรียกใช้จากโค้ดเก่า
 async function getCurrentTermRegistrationMap() {
-    const map = new Map();
-    if (!supabaseClient) return map;
-    const { academic_year, semester } = getCurrentTerm();
-    let query = supabaseClient
-        .from("registrations")
-        .select("student_id, clubs(name)")
-        .eq("academic_year", academic_year);
-    if (getRegistrationScope() !== "academic_year") {
-        query = query.eq("semester", semester);
-    }
-    const { data, error } = await query;
-    if (error) {
+    try {
+        return await getStudentRegistrationMap("__current__");
+    } catch (error) {
         console.warn("Failed to load current-term registrations for status map:", error);
-        return map;
+        return new Map();
     }
-    (data || []).forEach(r => {
-        if (!r.student_id) return;
-        const key = String(r.student_id);
-        if (!map.has(key)) {
-            map.set(key, { club_name: r.clubs ? r.clubs.name : null });
-        }
-    });
-    return map;
 }
 
 // 📥 ส่งออก CSV รายชื่อนักเรียนที่ "ยังไม่ได้ลงทะเบียนชุมนุม" ในเทอมปัจจุบัน (เคารพตัวกรองห้องเรียน + คำค้นหา)
@@ -2853,6 +2982,7 @@ async function exportUnregisteredStudentsToCSV() {
     try {
         const searchVal = document.getElementById("admin-student-search-input")?.value.trim() || "";
         const levelVal = (document.getElementById("admin-student-level-filter")?.value || "").trim();
+        const termFilter = getStudentTermFilterValue();
 
         let query = supabaseClient.from("students").select("*");
         if (searchVal) {
@@ -2868,21 +2998,20 @@ async function exportUnregisteredStudentsToCSV() {
         const { data, error } = await query.order("level", { ascending: true }).order("student_id", { ascending: true });
         if (error) throw error;
 
-        const regMap = await getCurrentTermRegistrationMap();
+        const regMap = await getStudentRegistrationMap(termFilter);
         const unregistered = (data || []).filter(s => !regMap.has(String(s.student_id)));
 
         if (unregistered.length === 0) {
-            showToast("ไม่มีรายชื่อนักเรียนที่ยังไม่ลงทะเบียนตามเงื่อนไขปัจจุบัน", "warning");
+            showToast(`ไม่มีรายชื่อนักเรียนที่ยังไม่ลงทะเบียนใน${getStudentTermFilterLabel(termFilter)}`, "warning");
             return;
         }
 
-        const term = getCurrentTerm();
         let csvContent = "เลขประจำตัวนักเรียน,คำนำหน้า,ชื่อ,นามสกุล,ระดับชั้น/ห้อง\n";
         unregistered.forEach(s => {
             csvContent += `"${s.student_id}","${s.prefix || ""}","${s.first_name || ""}","${s.last_name || ""}","${s.level || ""}"\n`;
         });
 
-        downloadCSVFile(csvContent, `รายชื่อนักเรียนยังไม่ลงทะเบียน_เทอม${term.semester}-${term.academic_year}.csv`);
+        downloadCSVFile(csvContent, `รายชื่อนักเรียนยังไม่ลงทะเบียน_${getStudentTermFileLabel(termFilter)}.csv`);
     } catch (e) {
         console.error("Error exporting unregistered students:", e);
         showToast("ส่งออกรายชื่อยังไม่ลงทะเบียนไม่สำเร็จ: " + (e.message || e), "error");
