@@ -4112,18 +4112,33 @@ async function exportRegistrationReportToExcel() {
     }
 }
 
-async function exportRegistrationReportToPDF() {
-    const model = await ensureRegistrationReportModel();
-    if (!model) return;
+function buildRegistrationReportPrintDocument(model) {
     const detailRows = registrationReportDetailRows(model).map(row => `<tr>${row.map(cell => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("");
     const summaryRows = model.summary.map(item => `<tr><td>${escapeHtml(item.group)}</td><td>${escapeHtml(item.teacher)}</td><td>${escapeHtml(item.location)}</td><td>${item.total}${item.capacity ? `/${item.capacity}` : ""}</td><td>${item.verified}</td><td>${item.pending}</td></tr>`).join("");
-    const printWindow = window.open("", "_blank", "noopener,noreferrer");
+    return `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>รายงานลงทะเบียนชุมนุม</title><style>body{font-family:Arial,'Noto Sans Thai',sans-serif;color:#17221c;margin:24px}h1{margin:0 0 6px;color:#047857}h2{margin:22px 0 8px;color:#065f46}p{margin:4px 0;color:#475569}.stats{display:flex;gap:10px;margin:16px 0}.stat{border:1px solid #cbd5e1;border-radius:6px;padding:10px;min-width:130px}.stat strong{display:block;font-size:20px;color:#047857}table{width:100%;border-collapse:collapse;margin-top:8px;font-size:11px}th{background:#d1fae5;color:#064e3b}th,td{border:1px solid #cbd5e1;padding:6px;text-align:left}@media print{button{display:none}.page-break{page-break-before:always}}</style></head><body><h1>รายงานสรุปการลงทะเบียนชุมนุม</h1><p>${escapeHtml(model.periodLabel)} · ${model.groupBy === "grade" ? "แยกตามระดับชั้น" : "แยกตามชุมนุม"}</p><div class="stats"><div class="stat"><strong>${model.total}</strong>ลงทะเบียนทั้งหมด</div><div class="stat"><strong>${model.verified}</strong>ยืนยันแล้ว</div><div class="stat"><strong>${model.pending}</strong>สำรองสิทธิ์</div></div><h2>สรุป</h2><table><thead><tr><th>${model.groupBy === "grade" ? "ระดับชั้น" : "ชุมนุม"}</th><th>ครูผู้สอน</th><th>สถานที่</th><th>จำนวน/โควตา</th><th>ยืนยันแล้ว</th><th>สำรองสิทธิ์</th></tr></thead><tbody>${summaryRows}</tbody></table><h2 class="page-break">รายชื่อผู้ลงทะเบียน</h2><table><thead><tr><th>ปี</th><th>เทอม</th><th>รหัส</th><th>ชื่อ-นามสกุล</th><th>ระดับชั้น</th><th>ชุมนุม</th><th>ครู</th><th>สถานที่</th><th>สถานะ</th><th>วันเวลา</th></tr></thead><tbody>${detailRows}</tbody></table><script>window.onload=()=>{window.print();};<\/script></body></html>`;
+}
+
+async function exportRegistrationReportToPDF() {
+    // Open the window in the click handler before any async work so browsers allow it.
+    const printWindow = window.open("", "_blank");
     if (!printWindow) {
         showToast("เบราว์เซอร์บล็อกหน้าต่างพิมพ์ กรุณาอนุญาต pop-up แล้วลองใหม่", "warning");
         return;
     }
-    printWindow.document.write(`<!doctype html><html lang="th"><head><meta charset="utf-8"><title>รายงานลงทะเบียนชุมนุม</title><style>body{font-family:Arial,'Noto Sans Thai',sans-serif;color:#17221c;margin:24px}h1{margin:0 0 6px;color:#047857}h2{margin:22px 0 8px;color:#065f46}p{margin:4px 0;color:#475569}.stats{display:flex;gap:10px;margin:16px 0}.stat{border:1px solid #cbd5e1;border-radius:6px;padding:10px;min-width:130px}.stat strong{display:block;font-size:20px;color:#047857}table{width:100%;border-collapse:collapse;margin-top:8px;font-size:11px}th{background:#d1fae5;color:#064e3b}th,td{border:1px solid #cbd5e1;padding:6px;text-align:left}@media print{button{display:none}.page-break{page-break-before:always}}</style></head><body><h1>รายงานสรุปการลงทะเบียนชุมนุม</h1><p>${escapeHtml(model.periodLabel)} · ${model.groupBy === "grade" ? "แยกตามระดับชั้น" : "แยกตามชุมนุม"}</p><div class="stats"><div class="stat"><strong>${model.total}</strong>ลงทะเบียนทั้งหมด</div><div class="stat"><strong>${model.verified}</strong>ยืนยันแล้ว</div><div class="stat"><strong>${model.pending}</strong>สำรองสิทธิ์</div></div><h2>สรุป</h2><table><thead><tr><th>${model.groupBy === "grade" ? "ระดับชั้น" : "ชุมนุม"}</th><th>ครูผู้สอน</th><th>สถานที่</th><th>จำนวน/โควตา</th><th>ยืนยันแล้ว</th><th>สำรองสิทธิ์</th></tr></thead><tbody>${summaryRows}</tbody></table><h2 class="page-break">รายชื่อผู้ลงทะเบียน</h2><table><thead><tr><th>ปี</th><th>เทอม</th><th>รหัส</th><th>ชื่อ-นามสกุล</th><th>ระดับชั้น</th><th>ชุมนุม</th><th>ครู</th><th>สถานที่</th><th>สถานะ</th><th>วันเวลา</th></tr></thead><tbody>${detailRows}</tbody></table><script>window.onload=()=>{window.print();};<\/script></body></html>`);
-    printWindow.document.close();
+    printWindow.document.write("กำลังโหลดข้อมูลรายงาน...");
+    try {
+        const model = await ensureRegistrationReportModel();
+        if (!model) {
+            printWindow.close();
+            return;
+        }
+        printWindow.document.open();
+        printWindow.document.write(buildRegistrationReportPrintDocument(model));
+        printWindow.document.close();
+    } catch (error) {
+        printWindow.close();
+        showToast(`เปิดรายงาน PDF ไม่สำเร็จ: ${error.message || error}`, "error");
+    }
 }
 
 window.loadRegistrationReportPreview = loadRegistrationReportPreview;

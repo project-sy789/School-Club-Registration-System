@@ -270,9 +270,6 @@
                                 <h3>รายงานและสถิติภาพรวม</h3>
                                 <p style="color: var(--text-secondary); font-size: 0.9rem;">ข้อมูลสรุปยอดการรับสมัครและรายชื่อนักเรียนแยกตามชุมนุม</p>
                             </div>
-                            <button class="btn-primary" onclick="exportRegistrationReportToExcel()">
-                                <i class="fa-solid fa-file-excel"></i> ดาวน์โหลด Excel ทั้งหมด
-                            </button>
                         </div>
 
                         <div class="registration-report-toolbar" aria-label="ตัวเลือกส่งออกรายงาน">
@@ -290,8 +287,8 @@
                                 </select>
                             </div>
                             <div class="registration-report-actions">
-                                <button class="btn-small-success" type="button" onclick="exportRegistrationReportToExcel()">
-                                    <i class="fa-solid fa-file-excel"></i> Excel สรุป + รายชื่อ
+                                <button class="btn-small-success" type="button" onclick="exportRegistrationReportToExcel()" title="ดาวน์โหลดข้อมูลตามช่วงเวลาและรูปแบบการจัดกลุ่มที่เลือก">
+                                    <i class="fa-solid fa-file-excel"></i> ดาวน์โหลด Excel (สรุป + รายชื่อ)
                                 </button>
                                 <button class="btn-secondary" type="button" onclick="exportRegistrationReportToPDF()">
                                     <i class="fa-solid fa-file-pdf"></i> พิมพ์ / บันทึก PDF
@@ -1243,6 +1240,6 @@
     <!-- 💻 6. Javascript Logic Engine -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="config.js?v=1.1.2"></script>
-    <script src="app.js?v=1.2.18"></script>
+    <script src="app.js?v=1.2.19"></script>
 </body>
 </html>
