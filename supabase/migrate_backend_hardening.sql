@@ -150,9 +150,9 @@ REVOKE ALL ON FUNCTION is_admin() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION is_admin() TO authenticated;
 
 -- Admins can manage other admin accounts from the dashboard without exposing
--- auth.users or requiring a service_role key in the browser. The invited email
--- must already have a Supabase Auth account; only the first bootstrap admin
--- still needs to be inserted once during initial setup.
+-- auth.users or requiring a service_role key in the browser. New Auth users are
+-- invited by the admin-invite-user Edge Function; only the first bootstrap
+-- admin still needs to be inserted once during initial setup.
 CREATE OR REPLACE FUNCTION admin_list_users()
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -170,6 +170,7 @@ BEGIN
         jsonb_build_object(
             'user_id', au.user_id,
             'email', COALESCE(u.email, ''),
+            'email_confirmed', u.email_confirmed_at IS NOT NULL,
             'enabled', au.enabled,
             'created_at', au.created_at,
             'is_current_user', au.user_id = auth.uid()
@@ -200,7 +201,7 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'code', 'INVALID_EMAIL', 'message', 'กรุณากรอกอีเมลให้ถูกต้อง');
     END IF;
 
-    SELECT id, email INTO v_user
+    SELECT id, email, email_confirmed_at INTO v_user
     FROM auth.users
     WHERE lower(email) = v_email
     LIMIT 1;
@@ -209,7 +210,7 @@ BEGIN
         RETURN jsonb_build_object(
             'success', false,
             'code', 'AUTH_USER_NOT_FOUND',
-            'message', 'ไม่พบบัญชีอีเมลนี้ใน Supabase Auth กรุณาสร้างบัญชีในระบบ Auth ก่อน แล้วจึงเพิ่มสิทธิ์ผู้ดูแล'
+            'message', 'ไม่พบบัญชีอีเมลนี้ในระบบ จะต้องส่งคำเชิญเพื่อสร้างบัญชีก่อน'
         );
     END IF;
 
@@ -220,7 +221,13 @@ BEGIN
     INSERT INTO audit_logs (action, details)
     VALUES ('ADMIN_GRANTED', 'เพิ่มผู้ดูแลระบบ: ' || v_email);
 
-    RETURN jsonb_build_object('success', true, 'user_id', v_user.id, 'email', v_email, 'enabled', true);
+    RETURN jsonb_build_object(
+        'success', true,
+        'user_id', v_user.id,
+        'email', v_email,
+        'email_confirmed', v_user.email_confirmed_at IS NOT NULL,
+        'enabled', true
+    );
 END;
 $$;
 

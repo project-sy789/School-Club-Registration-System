@@ -214,16 +214,32 @@
                 <h3>เข้าสู่ระบบผู้ดูแลระบบ</h3>
                 <p>ลงชื่อเข้าใช้บัญชีผู้ดูแลระบบของโรงเรียน</p>
                 
-                <div class="input-group" style="margin-bottom: 1.5rem; text-align: left;">
-                    <label for="admin-email-input">อีเมล</label>
-                    <input type="email" id="admin-email-input" autocomplete="username" placeholder="name@school.ac.th" onkeypress="handleAdminLoginKeyPress(event)">
-                    <label for="admin-passcode-input" style="margin-top: 12px;">รหัสผ่าน</label>
-                    <input type="password" id="admin-passcode-input" autocomplete="current-password" placeholder="กรอกรหัสผ่าน..." onkeypress="handleAdminLoginKeyPress(event)">
+                <div id="admin-login-fields">
+                    <div class="input-group" style="margin-bottom: 1.5rem; text-align: left;">
+                        <label for="admin-email-input">อีเมล</label>
+                        <input type="email" id="admin-email-input" autocomplete="username" placeholder="name@school.ac.th" onkeypress="handleAdminLoginKeyPress(event)">
+                        <label for="admin-passcode-input" style="margin-top: 12px;">รหัสผ่าน</label>
+                        <input type="password" id="admin-passcode-input" autocomplete="current-password" placeholder="กรอกรหัสผ่าน..." onkeypress="handleAdminLoginKeyPress(event)">
+                    </div>
+
+                    <button class="btn-primary" style="width: 100%;" onclick="attemptAdminLogin()">
+                        <i class="fa-solid fa-right-to-bracket"></i> ยืนยันรหัสผ่าน
+                    </button>
                 </div>
-                
-                <button class="btn-primary" style="width: 100%;" onclick="attemptAdminLogin()">
-                    <i class="fa-solid fa-right-to-bracket"></i> ยืนยันรหัสผ่าน
-                </button>
+
+                <div id="admin-password-setup" style="display:none; text-align:left;">
+                    <h4 style="margin:0 0 0.75rem;">ตั้งรหัสผ่านผู้ดูแล</h4>
+                    <p style="font-size:0.85rem; color:var(--text-secondary); margin:0 0 1rem;">ตั้งรหัสผ่านครั้งแรกให้เรียบร้อย แล้วจึงเข้าสู่หลังบ้าน</p>
+                    <div class="input-group">
+                        <label for="admin-new-password">รหัสผ่านใหม่</label>
+                        <input type="password" id="admin-new-password" autocomplete="new-password" placeholder="อย่างน้อย 8 ตัวอักษร">
+                        <label for="admin-confirm-password" style="margin-top:12px;">ยืนยันรหัสผ่าน</label>
+                        <input type="password" id="admin-confirm-password" autocomplete="new-password" placeholder="กรอกรหัสผ่านอีกครั้ง">
+                    </div>
+                    <button class="btn-primary" id="admin-set-password-btn" style="width:100%; margin-top:1.25rem;" onclick="completeAdminPasswordSetup()">
+                        <i class="fa-solid fa-key"></i> ตั้งรหัสผ่านและเข้าสู่ระบบ
+                    </button>
+                </div>
             </div>
 
             <!-- 📊 Admin control panel (แสดงเมื่อ Login ผ่านแล้ว) -->
@@ -734,21 +750,21 @@
                         <div class="admin-content-header" style="margin-bottom: 1.5rem;">
                             <div>
                                 <h3>จัดการผู้ดูแลระบบ</h3>
-                                <p style="color: var(--text-secondary); font-size: 0.9rem;">เพิ่มสิทธิ์ด้วยอีเมลของบัญชีที่มีอยู่ใน Supabase Auth และปิดสิทธิ์ผู้ดูแลได้จากหน้านี้</p>
+                                <p style="color: var(--text-secondary); font-size: 0.9rem;">สร้างลิงก์เชิญให้บัญชีใหม่ หรือเปิดสิทธิ์ให้บัญชีที่มีอยู่แล้ว</p>
                             </div>
                         </div>
 
                         <div class="admin-card" style="margin-bottom: 1.5rem;">
                             <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
                                 <div class="input-group" style="flex:1; min-width:240px;">
-                                    <label for="admin-add-email">อีเมลบัญชีผู้ดูแลคนใหม่</label>
+                                    <label for="admin-add-email">อีเมลผู้ดูแลคนใหม่</label>
                                     <input type="email" id="admin-add-email" placeholder="teacher@school.ac.th" autocomplete="off" onkeypress="handleAddAdminKeyPress(event)">
                                 </div>
                                 <button class="btn-primary" id="admin-add-btn" onclick="addAdminUser()" style="height:48px;">
                                     <i class="fa-solid fa-user-plus"></i> เพิ่มผู้ดูแล
                                 </button>
                             </div>
-                            <p style="font-size:0.8rem; color:var(--text-secondary); margin:10px 0 0;">บัญชีอีเมลต้องถูกสร้างไว้ในเมนู Authentication ของโปรเจกต์ก่อน การเพิ่มสิทธิ์จะไม่เปิดเผยรหัสผ่านหรือ service key</p>
+                            <p style="font-size:0.8rem; color:var(--text-secondary); margin:10px 0 0;">ระบบสร้างลิงก์ให้คัดลอกไปส่งผ่าน LINE หรือช่องทางส่วนตัวของโรงเรียน ไม่ส่งอีเมลและไม่ต้องตั้ง SMTP</p>
                         </div>
 
                         <div class="search-results-table-container" style="max-height:420px; overflow-y:auto;">
@@ -829,6 +845,29 @@
             </div>
         </section>
     </main>
+
+    <div class="modal-overlay" id="admin-invite-link-modal" role="dialog" aria-modal="true" aria-labelledby="admin-invite-link-title">
+        <div class="modal-card glass-container" style="max-width:560px;">
+            <button class="modal-close" type="button" onclick="closeAdminInviteLinkModal()" title="ปิดหน้าต่างลิงก์เชิญ">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+            <div class="modal-title" id="admin-invite-link-title"><i class="fa-solid fa-link"></i> ลิงก์สำหรับผู้ดูแล</div>
+            <p class="modal-subtitle" id="admin-invite-link-label">คัดลอกลิงก์แล้วส่งให้ผู้รับโดยตรง</p>
+            <div class="input-group" style="margin-top:1.25rem;">
+                <label for="admin-invite-link-input">ลิงก์ตั้งค่าบัญชี</label>
+                <input type="text" id="admin-invite-link-input" readonly autocomplete="off" aria-describedby="admin-invite-link-warning">
+            </div>
+            <p id="admin-invite-link-warning" style="font-size:0.85rem; color:#fcd34d; margin:0.75rem 0 1.25rem;">
+                ลิงก์นี้ใช้ตั้งค่าบัญชีได้ ควรส่งให้ผู้ดูแลคนนั้นโดยตรงและไม่เผยแพร่ในกลุ่มสาธารณะ
+            </p>
+            <div style="display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap;">
+                <button class="btn-secondary" type="button" onclick="closeAdminInviteLinkModal()">ปิด</button>
+                <button class="btn-primary" type="button" onclick="copyAdminInviteLink()">
+                    <i class="fa-solid fa-copy"></i> คัดลอกลิงก์
+                </button>
+            </div>
+        </div>
+    </div>
 
     <!-- 🎟️ Student registration history modal -->
     <div class="modal-overlay" id="registration-history-modal">

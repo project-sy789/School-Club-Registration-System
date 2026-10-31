@@ -5,6 +5,9 @@
 let supabaseClient = null;
 let activeToastTimeout = null; // บันทึกไอดีสำหรับเคลียร์เวลาแสดง Toast ป้องกันการแสดงทับแล้วดับเร็ว
 const REGISTRATION_TOKENS_KEY = "school-club-registration-tokens";
+let isAdminInvitationCallback = ["invite", "recovery", "signup"].includes(
+    new URLSearchParams(window.location.hash.replace(/^#/, "")).get("type")
+);
 
 function isPendingReference(value) {
     return /^0\d{9}$/.test(value) || /^TMP-[A-Z0-9]{6,32}$/i.test(value);
@@ -88,6 +91,7 @@ document.addEventListener("DOMContentLoaded", () => {
         registrationScopeSelect.addEventListener("change", updateRegistrationScopeSettingsUI);
     }
 
+    if (isAdminInvitationCallback) switchTab("admin");
     initSupabaseConnection();
 });
 
@@ -223,6 +227,11 @@ async function syncAdminSession(session) {
     }
 
     state.isAdminLoggedIn = true;
+    if (isAdminInvitationCallback) {
+        document.getElementById("admin-login-area").style.display = "block";
+        document.getElementById("admin-login-fields").style.display = "none";
+        document.getElementById("admin-password-setup").style.display = "block";
+    }
     return true;
 }
 
@@ -2049,8 +2058,11 @@ function renderAdminUsers() {
         const createdAt = user.created_at
             ? new Date(user.created_at).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" })
             : "-";
-        const statusText = user.enabled ? "เปิดใช้งาน" : "ปิดสิทธิ์";
-        const statusColor = user.enabled ? "var(--accent-mint)" : "#fca5a5";
+        const statusText = !user.enabled
+            ? "ปิดสิทธิ์"
+            : user.email_confirmed === false ? "รอเปิดลิงก์เชิญ" : "เปิดใช้งาน";
+        const statusColor = !user.enabled ? "#fca5a5"
+            : user.email_confirmed === false ? "#fcd34d" : "var(--accent-mint)";
         const actionLabel = user.enabled ? "ปิดสิทธิ์" : "เปิดสิทธิ์";
         const actionIcon = user.enabled ? "fa-user-slash" : "fa-user-check";
         row.innerHTML = `
@@ -2083,15 +2095,111 @@ async function addAdminUser() {
 
     button.disabled = true;
     try {
-        const { data, error } = await supabaseClient.rpc("admin_add_user_by_email", { p_email: email });
-        if (error) throw error;
+        const { data, error } = await supabaseClient.functions.invoke("admin-invite-user", {
+            body: {
+                email,
+                redirectTo: window.location.href.split("#")[0]
+            }
+        });
+        if (error) {
+            let message = data?.message || error.message;
+            const responseStatus = error.context?.status;
+            if (error.context && typeof error.context.json === "function") {
+                try {
+                    const responseBody = await error.context.json();
+                    message = responseBody?.message || message;
+                } catch (_) {
+                    // Keep the SDK error when the response has no JSON body.
+                }
+            }
+            if (responseStatus === 404 || /function.{0,80}(not found|does not exist)/i.test(message)) {
+                message = "ฟังก์ชันเชิญผู้ดูแลยังไม่ได้ติดตั้ง กรุณาติดตั้ง admin-invite-user หนึ่งครั้งก่อนใช้งาน";
+            }
+            throw new Error(message || "เพิ่มผู้ดูแลไม่สำเร็จ");
+        }
         if (!data?.success) throw new Error(data?.message || "เพิ่มผู้ดูแลไม่สำเร็จ");
+        if (data.invited && !data.inviteLink) {
+            throw new Error("เพิ่มบัญชีแล้ว แต่ Supabase ไม่ได้ส่งลิงก์กลับมา กรุณาลองเพิ่มอีเมลนี้อีกครั้ง");
+        }
         input.value = "";
-        showToast(`เพิ่ม ${data.email} เป็นผู้ดูแลแล้ว`, "success");
+        if (data.inviteLink) showAdminInviteLink(data.inviteLink, data.email, data.resent);
+        showToast(data.warning || (data.resent
+            ? `สร้างลิงก์ตั้งรหัสผ่านผู้ดูแลสำหรับ ${data.email} แล้ว`
+            : data.invited
+                ? `สร้างลิงก์เชิญผู้ดูแลสำหรับ ${data.email} แล้ว`
+                : `เพิ่มสิทธิ์ผู้ดูแลให้ ${data.email} แล้ว`), data.warning ? "warning" : "success");
         await loadAdminUsers();
     } catch (e) {
         console.error("Error adding admin user:", e);
         showToast(e.message || "เพิ่มผู้ดูแลไม่สำเร็จ", "error");
+    } finally {
+        button.disabled = false;
+    }
+}
+
+function showAdminInviteLink(link, email, resent = false) {
+    const modal = document.getElementById("admin-invite-link-modal");
+    const input = document.getElementById("admin-invite-link-input");
+    const label = document.getElementById("admin-invite-link-label");
+    if (!modal || !input) return;
+    input.value = link;
+    if (label) {
+        label.textContent = resent
+            ? `สร้างลิงก์ตั้งรหัสผ่านใหม่สำหรับ ${email || "ผู้ดูแล"} แล้ว`
+            : `สร้างลิงก์เชิญสำหรับ ${email || "ผู้ดูแล"} แล้ว`;
+    }
+    modal.classList.add("active");
+    input.focus();
+    input.select();
+}
+
+async function copyAdminInviteLink() {
+    const input = document.getElementById("admin-invite-link-input");
+    if (!input?.value) return;
+    try {
+        await navigator.clipboard.writeText(input.value);
+    } catch (_) {
+        input.focus();
+        input.select();
+        document.execCommand("copy");
+    }
+    showToast("คัดลอกลิงก์แล้ว ส่งต่อให้ผู้ดูแลผ่านช่องทางของโรงเรียนได้เลย", "success");
+}
+
+function closeAdminInviteLinkModal() {
+    document.getElementById("admin-invite-link-modal")?.classList.remove("active");
+}
+
+async function completeAdminPasswordSetup() {
+    const password = document.getElementById("admin-new-password")?.value || "";
+    const confirmation = document.getElementById("admin-confirm-password")?.value || "";
+    const button = document.getElementById("admin-set-password-btn");
+    if (password.length < 8) {
+        showToast("รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร", "warning");
+        return;
+    }
+    if (password !== confirmation) {
+        showToast("รหัสผ่านทั้งสองช่องไม่ตรงกัน", "warning");
+        return;
+    }
+
+    button.disabled = true;
+    try {
+        const { error } = await supabaseClient.auth.updateUser({ password });
+        if (error) throw error;
+        isAdminInvitationCallback = false;
+        history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+        document.getElementById("admin-new-password").value = "";
+        document.getElementById("admin-confirm-password").value = "";
+        document.getElementById("admin-password-setup").style.display = "none";
+        document.getElementById("admin-login-area").style.display = "none";
+        document.getElementById("admin-dashboard-area").style.display = "grid";
+        state.isAdminLoggedIn = true;
+        switchAdminSubTab("stats");
+        showToast("ตั้งรหัสผ่านและเปิดใช้งานบัญชีผู้ดูแลแล้ว", "success");
+    } catch (e) {
+        console.error("Admin password setup failed:", e);
+        showToast(e.message || "ตั้งรหัสผ่านไม่สำเร็จ กรุณาเปิดลิงก์เชิญใหม่", "error");
     } finally {
         button.disabled = false;
     }
@@ -2119,6 +2227,9 @@ async function toggleAdminUser(userId, enabled) {
 
 window.addAdminUser = addAdminUser;
 window.handleAddAdminKeyPress = handleAddAdminKeyPress;
+window.completeAdminPasswordSetup = completeAdminPasswordSetup;
+window.copyAdminInviteLink = copyAdminInviteLink;
+window.closeAdminInviteLinkModal = closeAdminInviteLinkModal;
 window.toggleAdminUser = toggleAdminUser;
 
 // โหลดข้อมูลรายงานและตารางสิทธิ์ต่างๆ ทั้งหมดมาเก็บไว้ที่ State
