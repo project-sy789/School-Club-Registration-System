@@ -1,8 +1,8 @@
 # 🏫 ระบบลงทะเบียนเรียนชุมนุมนักเรียนระดับมัธยม (School Club Registration System)
 
-[![Live Demo](https://img.shields.io/badge/Demo-Live%20Website-emerald?style=for-the-badge&logo=googlechrome&logoColor=white)](https://project-sy789.github.io/School-Club-Registration-System/)
+[![Live Demo](https://img.shields.io/badge/Demo-Live%20Website-emerald?style=for-the-badge&logo=googlechrome&logoColor=white)](https://club.sapyai.com/)
 
-> 🌐 **ลิงก์ระบบตัวอย่างออนไลน์ (Live Demo):** [https://project-sy789.github.io/School-Club-Registration-System/](https://project-sy789.github.io/School-Club-Registration-System/)
+> 🌐 **ลิงก์ระบบตัวอย่างออนไลน์ (Live Demo):** [https://club.sapyai.com/](https://club.sapyai.com/)
 > 
 > *ลิงก์ตัวอย่างใช้สำหรับดูหน้าบ้านเท่านั้น ห้ามใช้ข้อมูลจริงหรือรหัสผ่านจากตัวอย่างในการเปิดใช้งานโรงเรียน*
 
