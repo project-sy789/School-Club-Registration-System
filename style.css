@@ -137,7 +137,6 @@ header {
     object-fit: contain;
     border-radius: 6px;
     display: block;
-    filter: grayscale(1);
 }
 
 .logo-text h1 {
