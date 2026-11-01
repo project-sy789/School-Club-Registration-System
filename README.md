@@ -80,12 +80,12 @@
 
 ```sql
 BEGIN;
-TRUNCATE TABLE registrations, audit_logs RESTART IDENTITY CASCADE;
-UPDATE clubs SET enrolled_count = 0;
+DELETE FROM registrations WHERE id IS NOT NULL;
+UPDATE clubs SET enrolled_count = 0 WHERE id IS NOT NULL;
 COMMIT;
 ```
 
-อย่าใช้ `setup_database.sql` เพื่อรีเซ็ตข้อมูลระหว่างใช้งานจริง เพราะไฟล์นั้นมี `DROP TABLE` และจะลบตารางกับข้อมูลทั้งหมด ต้องใช้ `demo_reset.sql` สำหรับสาธิต หรือคำสั่งล้าง `registrations` ด้านบนสำหรับเริ่มรอบสมัครใหม่
+คำสั่งนี้จะล้างเฉพาะรายการสมัครและรีเซ็ตยอดที่นั่ง โดยเก็บ `audit_logs` ไว้เพื่อการตรวจสอบย้อนหลัง อย่าใช้ `setup_database.sql` เพื่อรีเซ็ตข้อมูลระหว่างใช้งานจริง เพราะไฟล์นั้นมี `DROP TABLE` และจะลบตารางกับข้อมูลทั้งหมด ต้องใช้ `demo_reset.sql` สำหรับสาธิต หรือคำสั่งล้าง `registrations` ด้านบนสำหรับเริ่มรอบสมัครใหม่
 
 ---
 
