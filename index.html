@@ -945,7 +945,7 @@
                 <i class="fa-solid fa-xmark"></i>
             </button>
             <div class="modal-title"><i class="fa-solid fa-shield-halved"></i> ยืนยันตัวตนนักเรียน</div>
-            <div class="modal-subtitle">กรอกรหัสนักเรียนและเลขท้ายบัตรประชาชน 4 หลัก เพื่อดูประวัติหรือยกเลิกรายการ</div>
+            <div class="modal-subtitle">รายการที่รอตรวจสอบใช้เบอร์โทรที่ลงทะเบียนไว้ เมื่อผู้ดูแลจับคู่แล้วให้ใช้รหัสนักเรียนจริงและเลขท้ายบัตรประชาชน 4 หลัก</div>
             <div class="input-group" style="margin-top: 1rem;">
                 <label for="student-identity-id">รหัสนักเรียน</label>
                 <input type="text" id="student-identity-id" autocomplete="off" readonly>
@@ -1007,7 +1007,7 @@
                                 <span class="profile-value" id="modal-verified-name">-</span>
                             </div>
                             <div class="profile-row">
-                                <span class="profile-label">รหัสอ้างอิง:</span>
+                                <span class="profile-label" id="modal-verified-id-label">รหัสนักเรียน:</span>
                                 <span class="profile-value" id="modal-verified-id">-</span>
                             </div>
                             <div class="profile-row">
@@ -1129,7 +1129,7 @@
                             <span class="val" id="ticket-student-level">ม.4/1</span>
                         </div>
                         <div class="ticket-field">
-                            <span class="label">รหัสนักเรียน / ข้อมูลอ้างอิง</span>
+                            <span class="label" id="ticket-student-id-label">รหัสนักเรียน</span>
                             <span class="val" id="ticket-student-id">10001</span>
                         </div>
                         <div class="ticket-field">

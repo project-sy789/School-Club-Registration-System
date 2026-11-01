@@ -12,6 +12,26 @@ function isPendingReference(value) {
     return /^0\d{9}$/.test(value) || /^TMP-[A-Z0-9]{6,32}$/i.test(value);
 }
 
+function isPendingPhoneReference(value) {
+    return /^0\d{9}$/.test(String(value || "").trim());
+}
+
+function formatStudentFacingReference(value, isPending, contactHint = "") {
+    const reference = String(value || "").trim();
+    if (!isPending) return reference || "ไม่ระบุรหัสนักเรียน";
+    if (isPendingPhoneReference(reference)) return reference;
+    if (/^TMP-/i.test(reference)) return "นักเรียนใหม่ (รอตรวจสอบ)";
+    if (/^\d{4}$/.test(String(contactHint))) return `ลงท้าย ${contactHint}`;
+    return "นักเรียนใหม่ (รอตรวจสอบ)";
+}
+
+function setStudentFacingReference(label, value) {
+    const labelElement = document.getElementById("ticket-student-id-label");
+    const valueElement = document.getElementById("ticket-student-id");
+    if (labelElement) labelElement.innerText = label;
+    if (valueElement) valueElement.innerText = value;
+}
+
 function escapeHtml(value) {
     return String(value ?? "")
         .replace(/&/g, "&amp;")
@@ -741,7 +761,7 @@ async function quickVerifyStudent() {
         } else {
             const message = data?.code === "RATE_LIMITED"
                 ? data.message
-                : "ไม่พบรหัสนักเรียนหรือเลขบัตรประชาชน กรุณาตรวจสอบอีกครั้ง หรือเลือกนักเรียนใหม่เพื่อใช้เบอร์โทร/รหัส TMP";
+                : "ไม่พบรหัสนักเรียนหรือเลขบัตรประชาชน กรุณาตรวจสอบอีกครั้ง หรือเลือกนักเรียนใหม่เพื่อใช้เบอร์โทร";
             showToast(message, data?.code === "RATE_LIMITED" ? "error" : "warning");
             document.getElementById("student-quick-id").value = "";
             setCurrentStudentInfo(null);
@@ -768,6 +788,10 @@ function updateQuickVerifyUI() {
         const data = state.currentStudentInfo;
         const isPendingReference = Boolean(data.is_pending_reference);
         const displayName = `${data.prefix || ""}${data.first_name} ${data.last_name}`;
+        const referenceLabel = isPendingReference
+            ? (isPendingPhoneReference(data.student_id) ? "เบอร์โทร" : "ข้อมูลผู้สมัคร")
+            : "รหัสนักเรียน";
+        const referenceValue = formatStudentFacingReference(data.student_id, isPendingReference, data.pending_contact_hint);
         
         wrapper.innerHTML = `
             <div class="identity-card-header" style="color: ${isPendingReference ? "#7dd3fc" : "var(--accent-mint)"};">
@@ -777,7 +801,7 @@ function updateQuickVerifyUI() {
             <div style="background: rgba(52, 211, 153, 0.08); border: 1px solid rgba(52, 211, 153, 0.3); border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px;">
                 <div style="display: flex; flex-direction: column; overflow: hidden; flex: 1; text-align: left;">
                     <span style="font-size: 0.95rem; font-weight: 700; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${displayName}">${displayName}</span>
-                    <span style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">ระดับชั้น ${data.level} | รหัส: ${data.student_id}</span>
+                    <span style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">ระดับชั้น ${data.level} | ${referenceLabel}: ${referenceValue}</span>
                 </div>
                 <button onclick="clearStudentVerification()" title="ยกเลิกการระบุตัวตน" style="background: none; border: none; color: rgba(239, 68, 68, 0.8); cursor: pointer; padding: 6px; font-size: 1.1rem; display: flex; align-items: center; transition: all 0.2s;" onmouseover="this.style.color='#ef4444'; this.style.transform='scale(1.15)';" onmouseout="this.style.color='rgba(239, 68, 68, 0.8)'; this.style.transform='scale(1)';">
                     <i class="fa-solid fa-right-from-bracket"></i>
@@ -792,7 +816,7 @@ function updateQuickVerifyUI() {
             </div>
             <div style="display: flex; flex-direction: column; gap: 8px;">
                 <div style="display: flex; gap: 6px;">
-                    <input type="text" id="quick-new-id" placeholder="เบอร์โทร 10 หลัก หรือ TMP-XXXXXX" autocomplete="off" style="background: rgba(7,23,15,0.6); border: var(--border-glass); color: white; padding: 8px 10px; border-radius: 8px; font-size: 0.85rem; flex: 1;">
+                    <input type="tel" id="quick-new-id" placeholder="เบอร์โทร 10 หลัก" inputmode="numeric" maxlength="10" autocomplete="off" style="background: rgba(7,23,15,0.6); border: var(--border-glass); color: white; padding: 8px 10px; border-radius: 8px; font-size: 0.85rem; flex: 1;">
                     <select id="quick-prefix" style="background: rgba(7,23,15,0.6); border: var(--border-glass); color: white; padding: 8px; border-radius: 8px; font-size: 0.85rem; width: 38%;">
                         <option value="">คำนำหน้า</option>
                         <option value="เด็กชาย">เด็กชาย</option>
@@ -874,11 +898,11 @@ function saveQuickNewStudent() {
     const lastName = document.getElementById("quick-lastname").value.trim();
 
     if (!newId || !prefix || !level || !firstName || !lastName) {
-        showToast("กรุณากรอกข้อมูลให้ครบ: เบอร์โทรหรือรหัส TMP, คำนำหน้า, ชื่อ, นามสกุล และระดับชั้น", "warning");
+        showToast("กรุณากรอกข้อมูลให้ครบ: เบอร์โทร คำนำหน้า ชื่อ นามสกุล และระดับชั้น", "warning");
         return;
     }
     if (!isPendingReference(newId)) {
-        showToast("ข้อมูลอ้างอิงนักเรียนใหม่ต้องเป็นเบอร์ 10 หลักที่ขึ้นต้นด้วย 0 หรือรหัสรูปแบบ TMP-XXXXXX", "warning");
+        showToast("กรุณากรอกเบอร์โทร 10 หลักที่ขึ้นต้นด้วย 0", "warning");
         return;
     }
 
@@ -1321,15 +1345,21 @@ function openRegistrationTicket(registrationId) {
 
     const club = registration.clubs || {};
     const studentName = `${registration.prefix || ""}${registration.first_name || ""} ${registration.last_name || ""}`.trim();
-    const reference = registration.registration_status === "pending" && registration.pending_contact_hint
-        ? `เบอร์อ้างอิงท้าย ${registration.pending_contact_hint}`
-        : (registration.student_id || "นักเรียนใหม่ (รอการจัดเลข)");
+    const isPending = registration.registration_status === "pending";
+    const reference = formatStudentFacingReference(
+        registration.student_id,
+        isPending,
+        registration.pending_contact_hint
+    );
 
     document.getElementById("ticket-school-name").innerText = state.settings.school_config?.school_name || "";
     document.getElementById("ticket-club-name").innerText = club.name || "ไม่ระบุชุมนุม";
     document.getElementById("ticket-student-name").innerText = studentName || "ไม่ระบุชื่อ";
     document.getElementById("ticket-student-level").innerText = registration.level || "-";
-    document.getElementById("ticket-student-id").innerText = reference;
+    setStudentFacingReference(
+        isPending ? (isPendingPhoneReference(registration.student_id) ? "เบอร์โทร" : "ข้อมูลผู้สมัคร") : "รหัสนักเรียน",
+        reference
+    );
     document.getElementById("ticket-location-teacher").innerHTML = `<i class="fa-solid fa-location-dot"></i> ${club.location || "ไม่ระบุสถานที่"} &nbsp;&nbsp;&nbsp; <i class="fa-solid fa-user-tie"></i> ${club.teacher || "ไม่ระบุครูผู้สอน"}`;
 
     const badge = document.getElementById("ticket-status-badge");
@@ -1456,7 +1486,13 @@ function openRegistrationModal(clubId) {
 
         // อัปเดตข้อมูลการแสดงผลในการ์ดบัตรรวมสไตล์พรีเมียม
         document.getElementById("modal-verified-name").innerText = displayName;
-        document.getElementById("modal-verified-id").innerText = data.student_id || "นักเรียนใหม่ (รอการจัดเลข)";
+        const modalReferenceLabel = document.getElementById("modal-verified-id-label");
+        if (modalReferenceLabel) {
+            modalReferenceLabel.innerText = isPendingReference
+                ? (isPendingPhoneReference(data.student_id) ? "เบอร์โทร:" : "ข้อมูลผู้สมัคร:")
+                : "รหัสนักเรียน:";
+        }
+        document.getElementById("modal-verified-id").innerText = formatStudentFacingReference(data.student_id, isPendingReference, data.pending_contact_hint);
         document.getElementById("modal-verified-level").innerText = data.level;
         const profileBadge = document.querySelector("#modal-verified-view .verified-card-badge");
         if (profileBadge) {
@@ -1580,7 +1616,7 @@ async function verifyStudentID() {
                 <i class="fa-solid fa-triangle-exclamation"></i> 
                 <div>
                     <strong>${data?.code === "RATE_LIMITED" ? escapeHtml(data.message) : "ไม่พบข้อมูลจากรหัสนักเรียนหรือเลขบัตรประชาชน"}</strong><br>
-                    ${data?.code === "RATE_LIMITED" ? "" : '<span style="font-weight:600;">หากยังไม่มีข้อมูลในทะเบียน ให้เลือกนักเรียนใหม่ แล้วกรอกชื่อ ชั้นเรียน และเบอร์โทร 10 หลักหรือรหัส TMP-XXXXXX เพื่อจองสิทธิ์</span>'}
+                    ${data?.code === "RATE_LIMITED" ? "" : '<span style="font-weight:600;">หากยังไม่มีข้อมูลในทะเบียน ให้เลือกนักเรียนใหม่ แล้วกรอกชื่อ ชั้นเรียน และเบอร์โทร 10 หลักเพื่อจองสิทธิ์</span>'}
                 </div>
             `;
             if (data?.code === "RATE_LIMITED") {
@@ -1619,7 +1655,7 @@ function enableNewStudentManualEntry() {
         <i class="fa-solid fa-user-plus"></i> 
         <div>
             <strong>โหมดลงทะเบียนนักเรียนใหม่ (ไม่มีเลขประจำตัว):</strong><br>
-            <span style="font-size:0.85rem; opacity:0.95;">กรุณากรอก คำนำหน้า ชื่อจริง นามสกุล ระดับชั้น และเบอร์โทร 10 หลักหรือรหัส TMP-XXXXXX เพื่อสำรองสิทธิ์ทันที</span>
+            <span style="font-size:0.85rem; opacity:0.95;">กรุณากรอกคำนำหน้า ชื่อจริง นามสกุล ระดับชั้น และเบอร์โทร 10 หลัก เพื่อสำรองสิทธิ์ทันที</span>
         </div>
     `;
     
@@ -1657,11 +1693,11 @@ async function submitStudentRegistration() {
         return;
     }
     if (!studentId) {
-        showToast("นักเรียนใหม่ต้องกรอกเบอร์โทร 10 หลักหรือรหัส TMP-XXXXXX", "warning");
+        showToast("นักเรียนใหม่ต้องกรอกเบอร์โทร 10 หลัก", "warning");
         return;
     }
     if ((!state.currentStudentInfo || state.currentStudentInfo.is_pending_reference) && !isPendingReference(studentId)) {
-        showToast("ข้อมูลอ้างอิงนักเรียนใหม่ต้องเป็นเบอร์ 10 หลักที่ขึ้นต้นด้วย 0 หรือรหัสรูปแบบ TMP-XXXXXX", "warning");
+        showToast("กรุณากรอกเบอร์โทร 10 หลักที่ขึ้นต้นด้วย 0", "warning");
         return;
     }
 
@@ -1714,10 +1750,11 @@ async function submitStudentRegistration() {
                 document.getElementById("ticket-club-name").innerText = state.currentClub.name;
                 document.getElementById("ticket-student-name").innerText = `${prefix}${firstName} ${lastName}`;
                 document.getElementById("ticket-student-level").innerText = level;
-                const ticketReference = data.status === "pending" && /^0\d{9}$/.test(studentId)
-                    ? `เบอร์อ้างอิงท้าย ${studentId.slice(-4)}`
-                    : (studentId || "นักเรียนใหม่ (รอการจัดเลข)");
-                document.getElementById("ticket-student-id").innerText = ticketReference;
+                const isPending = data.status === "pending";
+                const ticketReference = isPending && isPendingPhoneReference(studentId)
+                    ? `ลงท้าย ${studentId.slice(-4)}`
+                    : formatStudentFacingReference(studentId, isPending);
+                setStudentFacingReference(isPending ? "เบอร์โทร" : "รหัสนักเรียน", ticketReference);
                 document.getElementById("ticket-location-teacher").innerHTML = `<i class="fa-solid fa-location-dot"></i> ${state.currentClub.location} &nbsp;&nbsp;&nbsp; <i class="fa-solid fa-user-tie"></i> ${state.currentClub.teacher}`;
 
                 const badge = document.getElementById("ticket-status-badge");
