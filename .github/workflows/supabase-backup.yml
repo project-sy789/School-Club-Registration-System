@@ -1,0 +1,73 @@
+name: Backup Supabase database
+
+on:
+  schedule:
+    - cron: "23 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends postgresql-client gnupg
+
+      - name: Dump and encrypt database
+        id: dump
+        continue-on-error: true
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_DB_URL"
+          test -n "$BACKUP_PASSPHRASE"
+          mkdir -p backup
+          stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          pg_dump --format=custom --no-owner --no-privileges --file="backup/supabase-${stamp}.dump" "$SUPABASE_DB_URL"
+          gpg --batch --yes --pinentry-mode loopback --passphrase "$BACKUP_PASSPHRASE" \
+            --symmetric --cipher-algo AES256 --output "backup/supabase-${stamp}.dump.gpg" "backup/supabase-${stamp}.dump"
+          rm -f "backup/supabase-${stamp}.dump"
+
+      - name: Upload encrypted backup
+        if: steps.dump.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-backup-${{ github.run_id }}
+          path: backup/*.dump.gpg
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Create or update failure alert
+        if: steps.dump.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = '[Alert] Supabase backup failed';
+            const body = [
+              'Supabase database backup failed.',
+              '',
+              `Workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              `Time: ${new Date().toISOString()}`,
+              '',
+              'ตรวจสอบ SUPABASE_DB_URL, BACKUP_PASSPHRASE และสถานะฐานข้อมูล'
+            ].join('\n');
+            const open = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+            });
+            const existing = open.find(issue => issue.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: existing.number, body });
+            } else {
+              await github.rest.issues.create({ owner: context.repo.owner, repo: context.repo.repo, title, body });
+            }
+
+      - name: Fail workflow after alerting
+        if: steps.dump.outcome == 'failure'
+        run: exit 1

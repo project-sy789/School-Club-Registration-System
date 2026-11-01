@@ -77,15 +77,14 @@ BEGIN
     ) THEN
         RAISE EXCEPTION 'Duplicate student_id registrations exist in the same term; resolve them before applying this migration.';
     END IF;
-    IF EXISTS (
-        SELECT 1 FROM registrations
-        GROUP BY lower(btrim(first_name)), lower(btrim(last_name)), academic_year, semester
-        HAVING COUNT(*) > 1
-    ) THEN
-        RAISE EXCEPTION 'Duplicate normalized student names exist in the same term; resolve them before applying this migration.';
-    END IF;
 END;
 $$;
+
+-- Names are not unique identities. Older installs may have this constraint
+-- from setup_database.sql; remove it before allowing same-name students in
+-- different classes (or siblings with the same name).
+ALTER TABLE registrations DROP CONSTRAINT IF EXISTS unique_student_name_per_term;
+DROP INDEX IF EXISTS registrations_one_name_per_term_uidx;
 
 ALTER TABLE clubs
     DROP CONSTRAINT IF EXISTS clubs_capacity_check;
@@ -108,14 +107,6 @@ CREATE INDEX IF NOT EXISTS registrations_club_term_idx
 CREATE UNIQUE INDEX IF NOT EXISTS registrations_one_student_per_term_uidx
     ON registrations(student_id, academic_year, semester)
     WHERE student_id IS NOT NULL;
-
-CREATE UNIQUE INDEX IF NOT EXISTS registrations_one_name_per_term_uidx
-    ON registrations(
-        lower(btrim(first_name)),
-        lower(btrim(last_name)),
-        academic_year,
-        semester
-    );
 
 CREATE UNIQUE INDEX IF NOT EXISTS registrations_one_pending_phone_per_term_uidx
     ON registrations(pending_contact_hash, academic_year, semester)
@@ -426,6 +417,7 @@ AS $$
               AND r.pending_contact_hash IS NOT NULL
               AND lower(btrim(r.first_name)) = lower(btrim(s.first_name))
               AND lower(btrim(r.last_name)) = lower(btrim(s.last_name))
+              AND lower(btrim(r.level)) = lower(btrim(s.level))
           )
       );
 $$;
@@ -534,7 +526,7 @@ AS $$
                   'UTF8'
               ),
               secret_row.secret,
-              'sha256'
+              'sha256'::text
           ), 'hex')
       AND r.registration_status = 'pending'
       AND r.academic_year = cfg.academic_year
@@ -596,7 +588,7 @@ AS $$
                   'UTF8'
               ),
               secret_row.secret,
-              'sha256'
+              'sha256'::text
           ), 'hex')
       AND r.registration_status = 'pending'
     ORDER BY r.academic_year DESC, r.semester DESC, r.created_at DESC;
@@ -645,7 +637,7 @@ BEGIN
 
     PERFORM pg_advisory_xact_lock(hashtextextended('registration-student:' || v_year || ':' || v_student_id, 0));
     PERFORM pg_advisory_xact_lock(hashtextextended(
-        'registration-name:' || v_year || ':' || lower(btrim(v_student.first_name)) || ':' || lower(btrim(v_student.last_name)), 0));
+        'registration-name:' || v_year || ':' || lower(btrim(v_student.first_name)) || ':' || lower(btrim(v_student.last_name)) || ':' || lower(btrim(v_student.level)), 0));
 
     -- If a verified registration already exists, leave the pending request for
     -- an administrator to resolve rather than moving a second seat.
@@ -673,7 +665,8 @@ BEGIN
       AND academic_year = v_year
       AND (v_scope = 'academic_year' OR semester = v_semester)
       AND lower(btrim(first_name)) = lower(btrim(v_student.first_name))
-      AND lower(btrim(last_name)) = lower(btrim(v_student.last_name));
+      AND lower(btrim(last_name)) = lower(btrim(v_student.last_name))
+      AND lower(btrim(level)) = lower(btrim(v_student.level));
 
     GET DIAGNOSTICS v_linked_count = ROW_COUNT;
 
@@ -727,7 +720,7 @@ BEGIN
 
     PERFORM pg_advisory_xact_lock(hashtextextended('registration-student:' || v_year || ':' || v_student_id, 0));
     PERFORM pg_advisory_xact_lock(hashtextextended(
-        'registration-name:' || v_year || ':' || lower(btrim(v_student.first_name)) || ':' || lower(btrim(v_student.last_name)), 0));
+        'registration-name:' || v_year || ':' || lower(btrim(v_student.first_name)) || ':' || lower(btrim(v_student.last_name)) || ':' || lower(btrim(v_student.level)), 0));
 
     IF EXISTS (
         SELECT 1 FROM registrations
@@ -753,7 +746,8 @@ BEGIN
       AND academic_year = v_year
       AND (v_scope = 'academic_year' OR semester = v_semester)
       AND lower(btrim(first_name)) = lower(btrim(v_student.first_name))
-      AND lower(btrim(last_name)) = lower(btrim(v_student.last_name));
+      AND lower(btrim(last_name)) = lower(btrim(v_student.last_name))
+      AND lower(btrim(level)) = lower(btrim(v_student.level));
 
     GET DIAGNOSTICS v_linked_count = ROW_COUNT;
     RETURN jsonb_build_object('success', true, 'linked_count', v_linked_count, 'student_id', v_student.student_id);
@@ -894,17 +888,8 @@ BEGIN
             v_level := v_student.level;
             v_status := 'verified';
         ELSE
-            IF EXISTS (
-                SELECT 1 FROM students
-                WHERE status = 'active'
-                  AND lower(btrim(first_name)) = lower(v_first_name)
-                  AND lower(btrim(last_name)) = lower(v_last_name)
-            ) THEN
-                RETURN jsonb_build_object('success', false, 'code', 'STUDENT_ID_REQUIRED', 'message', 'พบข้อมูลในทะเบียนแล้ว กรุณาสมัครด้วยรหัสนักเรียนจริง');
-            END IF;
-
             IF v_student_id !~ '^0[0-9]{9}$' AND v_student_id !~* '^TMP-[A-Z0-9]{6,32}$' THEN
-                RETURN jsonb_build_object('success', false, 'code', 'INVALID_CONTACT', 'message', 'นักเรียนที่ยังไม่มีรหัสให้ใช้เบอร์โทรศัพท์ผู้ปกครอง 10 หลัก หรือรหัสสมัครรูปแบบ TMP-XXXXXX ระบบไม่รับเลขบัตรประชาชน');
+                RETURN jsonb_build_object('success', false, 'code', 'INVALID_CONTACT', 'message', 'หากไม่ใช้รหัสนักเรียน ให้ใช้เลขบัตรประชาชนเพื่อค้นหาข้อมูลเดิม หรือใช้เบอร์โทร 10 หลัก/รหัส TMP-XXXXXX สำหรับรายการ Pending');
             END IF;
             IF v_student_id ~* '^TMP-' THEN
                 v_student_id := upper(v_student_id);
@@ -914,28 +899,19 @@ BEGIN
             v_pending_contact_hash := encode(hmac(
                 convert_to(v_student_id || ':' || lower(v_first_name) || ':' || lower(v_last_name) || ':' || lower(v_level), 'UTF8'),
                 v_phone_secret,
-                'sha256'
+                'sha256'::text
             ), 'hex');
             v_pending_contact_hint := right(v_student_id, 4);
             v_student_id := NULL;
         END IF;
-    ELSIF EXISTS (
-        SELECT 1 FROM students
-        WHERE status = 'active'
-          AND lower(btrim(first_name)) = lower(v_first_name)
-          AND lower(btrim(last_name)) = lower(v_last_name)
-    ) THEN
-        RETURN jsonb_build_object('success', false, 'code', 'STUDENT_ID_REQUIRED', 'message', 'พบข้อมูลในทะเบียนแล้ว กรุณาสมัครด้วยรหัสนักเรียนจริง');
-    ELSIF v_student_id IS NOT NULL THEN
-        RETURN jsonb_build_object('success', false, 'code', 'STUDENT_NOT_FOUND', 'message', 'ไม่พบรหัสนักเรียน กรุณาใช้เบอร์ผู้ปกครองหรือรหัสสมัคร TMP-XXXXXX');
     ELSE
-        RETURN jsonb_build_object('success', false, 'code', 'CONTACT_PHONE_REQUIRED', 'message', 'นักเรียนที่ยังไม่มีรหัสให้ใช้เบอร์โทรศัพท์ผู้ปกครอง 10 หลัก');
+        RETURN jsonb_build_object('success', false, 'code', 'CONTACT_PHONE_REQUIRED', 'message', 'นักเรียนที่ยังไม่มีรหัสให้ใช้เบอร์โทร 10 หลัก');
     END IF;
 
     -- Serialize identity checks across clubs. The existing semester indexes
     -- cannot prevent an annual-mode duplicate submitted to two clubs at once.
     PERFORM pg_advisory_xact_lock(hashtextextended(
-        'registration-name:' || v_year || ':' || lower(v_first_name) || ':' || lower(v_last_name), 0));
+        'registration-name:' || v_year || ':' || lower(v_first_name) || ':' || lower(v_last_name) || ':' || lower(v_level), 0));
     IF v_student_id IS NOT NULL THEN
         PERFORM pg_advisory_xact_lock(hashtextextended('registration-student:' || v_year || ':' || v_student_id, 0));
     END IF;
@@ -943,21 +919,6 @@ BEGIN
         PERFORM pg_advisory_xact_lock(hashtextextended('registration-contact:' || v_year || ':' || v_pending_contact_hash, 0));
     END IF;
 
-    IF EXISTS (
-        SELECT 1 FROM registrations
-        WHERE lower(btrim(first_name)) = lower(v_first_name)
-          AND lower(btrim(last_name)) = lower(v_last_name)
-          AND academic_year = v_year
-          AND (v_scope = 'academic_year' OR semester = v_semester)
-    ) THEN
-        RETURN jsonb_build_object(
-            'success', false,
-            'code', 'ALREADY_REGISTERED',
-            'message', CASE WHEN v_scope = 'academic_year'
-                THEN 'นักเรียนคนนี้ลงทะเบียนชุมนุมในปีการศึกษานี้แล้ว'
-                ELSE 'นักเรียนคนนี้ลงทะเบียนชุมนุมในภาคเรียนนี้แล้ว' END
-        );
-    END IF;
     IF v_student_id IS NOT NULL AND EXISTS (
         SELECT 1 FROM registrations
         WHERE student_id = v_student_id
@@ -1260,7 +1221,7 @@ BEGIN
         v_reference_hash := encode(hmac(
             convert_to(v_reference || ':' || lower(v_first_name) || ':' || lower(v_last_name) || ':' || lower(v_level), 'UTF8'),
             v_secret,
-            'sha256'
+            'sha256'::text
         ), 'hex');
         IF v_reg.pending_contact_hash IS DISTINCT FROM v_reference_hash THEN
             RETURN jsonb_build_object('success', false, 'code', 'FORBIDDEN', 'message', 'ข้อมูลอ้างอิงไม่ตรงกับรายการลงทะเบียนนี้');
@@ -1339,23 +1300,9 @@ BEGIN
         IF COALESCE(v_current_enrolled, v_club.enrolled_count) >= v_club.capacity AND NOT p_allow_over_capacity THEN
             RETURN jsonb_build_object('success', false, 'code', 'CLUB_FULL', 'message', 'ชุมนุมเต็มโควตาแล้ว');
         END IF;
-        PERFORM pg_advisory_xact_lock(hashtextextended(
-            'registration-name:' || v_year || ':' || lower(btrim(p_first_name)) || ':' || lower(btrim(p_last_name)), 0));
         IF NULLIF(btrim(p_student_id), '') IS NOT NULL THEN
             PERFORM pg_advisory_xact_lock(hashtextextended(
                 'registration-student:' || v_year || ':' || btrim(p_student_id), 0));
-        END IF;
-        IF EXISTS (
-            SELECT 1 FROM registrations
-            WHERE lower(btrim(first_name)) = lower(btrim(p_first_name))
-              AND lower(btrim(last_name)) = lower(btrim(p_last_name))
-              AND academic_year = v_year
-              AND (v_scope = 'academic_year' OR semester = v_semester)
-        ) THEN
-            RETURN jsonb_build_object('success', false, 'code', 'ALREADY_REGISTERED',
-                'message', CASE WHEN v_scope = 'academic_year'
-                    THEN 'นักเรียนคนนี้ลงทะเบียนชุมนุมในปีการศึกษานี้แล้ว'
-                    ELSE 'นักเรียนคนนี้ลงทะเบียนชุมนุมในภาคเรียนนี้แล้ว' END);
         END IF;
         IF NULLIF(btrim(p_student_id), '') IS NOT NULL AND EXISTS (
             SELECT 1 FROM registrations
@@ -1388,26 +1335,17 @@ BEGIN
            AND NOT p_allow_over_capacity THEN
             RETURN jsonb_build_object('success', false, 'code', 'CLUB_FULL', 'message', 'ชุมนุมเต็มโควตาแล้ว');
         END IF;
-        PERFORM pg_advisory_xact_lock(hashtextextended(
-            'registration-name:' || v_year || ':' || lower(btrim(p_first_name)) || ':' || lower(btrim(p_last_name)), 0));
         IF NULLIF(btrim(p_student_id), '') IS NOT NULL THEN
             PERFORM pg_advisory_xact_lock(hashtextextended(
                 'registration-student:' || v_year || ':' || btrim(p_student_id), 0));
         END IF;
-        IF EXISTS (
-            SELECT 1 FROM registrations
-            WHERE lower(btrim(first_name)) = lower(btrim(p_first_name))
-              AND lower(btrim(last_name)) = lower(btrim(p_last_name))
-              AND academic_year = v_year
-              AND (v_scope = 'academic_year' OR semester = v_semester)
-              AND id <> v_id
-        ) OR (NULLIF(btrim(p_student_id), '') IS NOT NULL AND EXISTS (
+        IF NULLIF(btrim(p_student_id), '') IS NOT NULL AND EXISTS (
             SELECT 1 FROM registrations
             WHERE student_id = NULLIF(btrim(p_student_id), '')
               AND academic_year = v_year
               AND (v_scope = 'academic_year' OR semester = v_semester)
               AND id <> v_id
-        )) THEN
+        ) THEN
             RETURN jsonb_build_object('success', false, 'code', 'ALREADY_REGISTERED',
                 'message', CASE WHEN v_scope = 'academic_year'
                     THEN 'นักเรียนคนนี้มีรายการสมัครในปีการศึกษานี้แล้ว'
@@ -1639,8 +1577,6 @@ BEGIN
                 CONTINUE;
             END IF;
 
-            PERFORM pg_advisory_xact_lock(hashtextextended(
-                'registration-name:' || v_current_year || ':' || lower(v_first_name) || ':' || lower(v_last_name), 0));
             IF v_student_id_cleaned IS NOT NULL THEN
                 PERFORM pg_advisory_xact_lock(hashtextextended(
                     'registration-student:' || v_current_year || ':' || v_student_id_cleaned, 0));
@@ -1653,17 +1589,6 @@ BEGIN
                     v_skipped := v_skipped || jsonb_build_object('row', v_row, 'reason', CASE WHEN v_scope = 'academic_year' THEN 'รหัสนักเรียน ' || v_student_id_cleaned || ' ลงทะเบียนปีนี้ไปแล้ว' ELSE 'รหัสนักเรียน ' || v_student_id_cleaned || ' ลงทะเบียนเทอมนี้ไปแล้ว' END);
                     CONTINUE;
                 END IF;
-            END IF;
-
-            IF EXISTS (
-                SELECT 1 FROM registrations
-                WHERE lower(btrim(first_name)) = lower(v_first_name)
-                  AND lower(btrim(last_name)) = lower(v_last_name)
-                  AND academic_year = v_current_year
-                  AND (v_scope = 'academic_year' OR semester = v_current_sem)
-            ) THEN
-                v_skipped := v_skipped || jsonb_build_object('row', v_row, 'reason', CASE WHEN v_scope = 'academic_year' THEN 'นักเรียน ' || v_first_name || ' ' || v_last_name || ' ลงทะเบียนปีนี้ไปแล้ว' ELSE 'นักเรียน ' || v_first_name || ' ' || v_last_name || ' ลงทะเบียนเทอมนี้ไปแล้ว' END);
-                CONTINUE;
             END IF;
 
             IF v_student_id_cleaned IS NOT NULL THEN

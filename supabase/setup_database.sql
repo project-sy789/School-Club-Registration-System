@@ -88,9 +88,9 @@ CREATE TABLE registrations (
     registration_status TEXT NOT NULL CHECK (registration_status IN ('verified', 'pending')),
     academic_year TEXT NOT NULL DEFAULT '2569',
     semester TEXT NOT NULL DEFAULT '1',
-    created_at TIMESTAMPTZ DEFAULT now(),
-    -- ห้ามชื่อ-นามสกุลเดียวกันลงทะเบียนซ้ำภายในเทอม/ปีการศึกษาเดียวกัน
-    CONSTRAINT unique_student_name_per_term UNIQUE (first_name, last_name, academic_year, semester)
+    created_at TIMESTAMPTZ DEFAULT now()
+    -- การกันลงทะเบียนซ้ำใช้รหัสนักเรียนหรือข้อมูลอ้างอิง Pending
+    -- ไม่ใช้ชื่อ-นามสกุลอย่างเดียว เพราะนักเรียนต่างชั้นอาจชื่อซ้ำกันได้
 );
 
 CREATE INDEX IF NOT EXISTS idx_registrations_term ON registrations(academic_year, semester);
@@ -198,23 +198,6 @@ BEGIN
         IF v_already_registered THEN
             RETURN jsonb_build_object('success', false, 'message', 'รหัสนักเรียน ' || v_student_id_cleaned || ' ได้ลงทะเบียนชุมนุมในเทอมนี้ไปแล้ว');
         END IF;
-    END IF;
-
-    SELECT EXISTS (
-        SELECT 1 FROM registrations
-        WHERE TRIM(first_name) = TRIM(p_first_name)
-          AND TRIM(last_name) = TRIM(p_last_name)
-          AND academic_year = v_current_year
-          AND (v_scope = 'academic_year' OR semester = v_current_sem)
-          AND (
-              student_id IS NULL
-              OR v_student_id_cleaned IS NULL
-              OR student_id = v_student_id_cleaned
-          )
-    ) INTO v_already_registered;
-
-    IF v_already_registered THEN
-        RETURN jsonb_build_object('success', false, 'message', 'นักเรียน ' || p_first_name || ' ' || p_last_name || ' ได้ลงทะเบียนชุมนุมในเทอมนี้ไปแล้ว');
     END IF;
 
     -- 3. ตรวจสอบโควตาที่นั่ง + Row Lock
@@ -400,18 +383,6 @@ BEGIN
                     v_skipped := v_skipped || jsonb_build_object('row', v_row, 'reason', CASE WHEN v_scope = 'academic_year' THEN 'รหัสนักเรียน ' || v_student_id_cleaned || ' ลงทะเบียนปีนี้ไปแล้ว' ELSE 'รหัสนักเรียน ' || v_student_id_cleaned || ' ลงทะเบียนเทอมนี้ไปแล้ว' END);
                     CONTINUE;
                 END IF;
-            END IF;
-
-            -- ป้องกันลงทะเบียนซ้ำด้วยชื่อ-นามสกุล — เฉพาะเทอม+ปีปัจจุบัน
-            IF EXISTS (
-                SELECT 1 FROM registrations
-                WHERE TRIM(first_name) = v_first_name
-                  AND TRIM(last_name) = v_last_name
-                  AND academic_year = v_current_year
-                  AND (v_scope = 'academic_year' OR semester = v_current_sem)
-            ) THEN
-                v_skipped := v_skipped || jsonb_build_object('row', v_row, 'reason', CASE WHEN v_scope = 'academic_year' THEN 'นักเรียน ' || v_first_name || ' ' || v_last_name || ' ลงทะเบียนปีนี้ไปแล้ว' ELSE 'นักเรียน ' || v_first_name || ' ' || v_last_name || ' ลงทะเบียนเทอมนี้ไปแล้ว' END);
-                CONTINUE;
             END IF;
 
             -- กำหนดสถานะ: มีในตาราง students (status='active') = verified, ไม่มี = pending
