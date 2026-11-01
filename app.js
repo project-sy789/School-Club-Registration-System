@@ -38,7 +38,10 @@ let state = {
     students: [],
     registrations: [],
     adminUsers: [],
-    auditLogs: [], // เก็บประวัติความปลอดภัยระบบ
+    auditLogs: [], // เก็บประวัติความปลอดภัยระบบ (เฉพาะหน้าปัจจุบัน)
+    auditLogsPage: 1,
+    auditLogsTotal: 0,
+    auditLogsRequestId: 0,
     settings: {
         school_config: { school_name: "ระบบลงทะเบียนชุมนุม", semester: "1", academic_year: "2569", registration_scope: "semester", allow_student_cancellation: false },
         registration_period: { is_active: true, start_time: "", end_time: "" }
@@ -2803,6 +2806,22 @@ function getStudentTermFilterLabel(value) {
     return registrationReportPeriodLabel(value);
 }
 
+function setStudentTermShortcut(value) {
+    const select = document.getElementById("admin-student-term-filter");
+    if (!select || ![...select.options].some(option => option.value === value)) return;
+    select.value = value;
+    filterAdminStudentsList();
+}
+
+function syncStudentTermShortcuts() {
+    const selected = getStudentTermFilterValue();
+    document.querySelectorAll("[data-student-term-shortcut]").forEach(button => {
+        const active = button.dataset.studentTermShortcut === selected;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", String(active));
+    });
+}
+
 function getStudentTermFileLabel(value) {
     return getStudentTermFilterLabel(value)
         .replace(/ทุกเทอม \/ ทุกปีการศึกษา/g, "ทั้งหมด")
@@ -2888,6 +2907,7 @@ async function populateStudentTermFilter(force = false) {
             ? previousValue
             : "__current__";
         select.dataset.loadedKey = currentKey;
+        syncStudentTermShortcuts();
     } catch (error) {
         console.error("Error loading student term filter:", error);
     } finally {
@@ -2958,7 +2978,10 @@ async function populateStudentLevelDropdown() {
 }
 
 function filterAdminStudentsList() {
-    loadStudentsList();
+    const resultCount = document.getElementById("admin-student-result-count");
+    if (resultCount) resultCount.textContent = "กำลังปรับตัวกรอง...";
+    clearTimeout(window.studentDirectoryFilterTimer);
+    window.studentDirectoryFilterTimer = setTimeout(() => loadStudentsList(), 220);
 }
 
 async function loadStudentsList() {
@@ -2971,8 +2994,13 @@ async function loadStudentsList() {
     const termFilter = getStudentTermFilterValue();
     const termCaption = document.getElementById("admin-student-term-caption");
     if (termCaption) {
-        termCaption.textContent = `แสดงสถานะการลงทะเบียนของ ${getStudentTermFilterLabel(termFilter)} · ข้อมูลนักเรียนจากฐานข้อมูลปัจจุบัน`;
+        termCaption.textContent = getStudentTermFilterLabel(termFilter);
     }
+    syncStudentTermShortcuts();
+    const resultCount = document.getElementById("admin-student-result-count");
+    const resultStatus = document.getElementById("admin-student-result-status");
+    if (resultCount) resultCount.textContent = "กำลังโหลดรายชื่อ...";
+    if (resultStatus) resultStatus.textContent = "กำลังคำนวณสถานะการลงทะเบียน";
 
     try {
         let query = supabaseClient.from("students").select("*");
@@ -2990,14 +3018,15 @@ async function loadStudentsList() {
             query = query.eq("level", levelVal);
         }
 
-        // เมื่อกรองตามสถานะลงทะเบียน ต้องดึงให้ครบเพื่อ join กับ registrations แล้วค่อยตัด 100
-        const limitWhenRegFilter = 1000;
-        const limitDefault = 100;
-        const { data, error } = await query
-            .order("student_id", { ascending: true })
-            .limit(regFilter === "all" ? limitDefault : limitWhenRegFilter);
-
-        if (error) throw error;
+        const pageSize = 1000;
+        const data = [];
+        query = query.order("student_id", { ascending: true });
+        for (let from = 0; ; from += pageSize) {
+            const { data: page, error } = await query.range(from, from + pageSize - 1);
+            if (error) throw error;
+            data.push(...(page || []));
+            if (!page || page.length < pageSize) break;
+        }
 
         // ดึง registrations ตามช่วงเวลาที่ผู้ดูแลเลือก เพื่อแมปสถานะของนักเรียนแต่ละคน
         const regMap = await getStudentRegistrationMap(termFilter);
@@ -3008,9 +3037,10 @@ async function loadStudentsList() {
         } else if (regFilter === "not_registered") {
             rows = rows.filter(s => !regMap.has(String(s.student_id)));
         }
-        // จำกัด 100 หลัง filter เพื่อให้สอดคล้องกับโหมดปกติ
-        if (regFilter !== "all" && rows.length > limitDefault) {
-            rows = rows.slice(0, limitDefault);
+        const matchedRegistered = rows.filter(student => regMap.has(String(student.student_id))).length;
+        if (resultCount) resultCount.textContent = `แสดง ${rows.length.toLocaleString("th-TH")} คน`;
+        if (resultStatus) {
+            resultStatus.textContent = `ลงทะเบียนแล้ว ${matchedRegistered.toLocaleString("th-TH")} · ยังไม่ลงทะเบียน ${(rows.length - matchedRegistered).toLocaleString("th-TH")}`;
         }
 
         tbody.innerHTML = "";
@@ -3069,6 +3099,10 @@ async function loadStudentsList() {
         await populateStudentLevelDropdown();
     } catch (e) {
         console.error("Error loading students list:", e);
+        const resultCount = document.getElementById("admin-student-result-count");
+        const resultStatus = document.getElementById("admin-student-result-status");
+        if (resultCount) resultCount.textContent = "โหลดรายชื่อไม่สำเร็จ";
+        if (resultStatus) resultStatus.textContent = "ตรวจสอบการเชื่อมต่อฐานข้อมูลแล้วลองใหม่อีกครั้ง";
         tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--status-danger);">ไม่สามารถดาวน์โหลดรายชื่อจากฐานข้อมูลได้</td></tr>`;
     }
 }
@@ -4370,10 +4404,16 @@ function showToast(message, type = "info") {
 async function loadAdminLogs() {
     if (!supabaseClient || !state.isAdminLoggedIn) return;
 
+    clearTimeout(window.auditLogFilterTimer);
+    const requestId = ++state.auditLogsRequestId;
     const tbody = document.getElementById("admin-logs-tbody");
+    const resultCount = document.getElementById("admin-log-result-count");
+    const pageSize = Number(document.getElementById("admin-log-page-size")?.value || 50);
+    const from = (state.auditLogsPage - 1) * pageSize;
+    if (resultCount) resultCount.textContent = "กำลังค้นหาประวัติ...";
     tbody.innerHTML = `
         <tr>
-            <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 3rem 0;">
+            <td colspan="6" class="audit-log-empty">
                 <i class="fa-solid fa-circle-notch fa-spin" style="font-size: 2rem; color: var(--accent-mint); margin-bottom: 1rem;"></i>
                 <div style="font-size: 0.95rem;">กำลังดึงประวัติความปลอดภัยระบบ...</div>
             </td>
@@ -4381,46 +4421,107 @@ async function loadAdminLogs() {
     `;
 
     try {
-        const { data, error } = await supabaseClient
+        let query = supabaseClient
             .from("audit_logs")
-            .select("*")
+            .select("id,created_at,action,student_id,student_name,club_name,ip_address,user_agent,details", { count: "exact" })
             .order("created_at", { ascending: false });
 
+        const action = document.getElementById("admin-log-action-filter")?.value || "";
+        const dateRange = document.getElementById("admin-log-date-filter")?.value || "all";
+        const search = (document.getElementById("admin-log-search-input")?.value || "")
+            .trim()
+            .replace(/[(),\\*]/g, " ")
+            .replace(/\s+/g, " ")
+            .slice(0, 80);
+
+        if (action) query = query.eq("action", action);
+        if (/^\d+$/.test(dateRange)) {
+            const cutoff = new Date(Date.now() - Number(dateRange) * 24 * 60 * 60 * 1000);
+            query = query.gte("created_at", cutoff.toISOString());
+        }
+        if (search) {
+            const columns = ["student_id", "student_name", "club_name", "details", "ip_address", "user_agent"];
+            query = query.or(columns.map(column => `${column}.ilike.%${search}%`).join(","));
+        }
+
+        const { data, count, error } = await query.range(from, from + pageSize - 1);
+
         if (error) throw error;
+        if (requestId !== state.auditLogsRequestId) return;
 
         state.auditLogs = data || [];
+        state.auditLogsTotal = count || 0;
         renderAdminLogs();
     } catch (e) {
+        if (requestId !== state.auditLogsRequestId) return;
         console.error("Error loading audit logs:", e);
         showToast("ไม่สามารถเรียกข้อมูลประวัติความปลอดภัยได้", "error");
         tbody.innerHTML = `
             <tr>
-                <td colspan="6" style="text-align: center; color: #ef4444; padding: 3rem 0;">
-                    <i class="fa-solid fa-triangle-exclamation" style="font-size: 2.5rem; margin-bottom: 1rem;"></i>
-                    <div style="font-weight: bold;">เกิดข้อผิดพลาดในการโหลดข้อมูล</div>
-                    <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 5px;">${e.message || e}</div>
+                <td colspan="6" class="audit-log-empty audit-log-error">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                    <div>เกิดข้อผิดพลาดในการโหลดข้อมูล</div>
+                    <small>${escapeHtml(e.message || e)}</small>
                 </td>
             </tr>
         `;
+        if (resultCount) resultCount.textContent = "โหลดประวัติไม่สำเร็จ";
     }
 }
 
 // เรนเดอร์ตารางล็อกความปลอดภัยระบบลงหน้าแอดมิน
 function renderAdminLogs(logs = state.auditLogs) {
     const tbody = document.getElementById("admin-logs-tbody");
+    const resultCount = document.getElementById("admin-log-result-count");
+    const pageLabel = document.getElementById("admin-log-page-label");
+    const pageStatus = document.getElementById("admin-log-page-status");
+    const prevButton = document.getElementById("admin-log-prev");
+    const nextButton = document.getElementById("admin-log-next");
+    const pageSize = Number(document.getElementById("admin-log-page-size")?.value || 50);
+    const first = state.auditLogsTotal ? (state.auditLogsPage - 1) * pageSize + 1 : 0;
+    const last = Math.min(state.auditLogsPage * pageSize, state.auditLogsTotal);
+    const totalPages = Math.max(1, Math.ceil(state.auditLogsTotal / pageSize));
+
+    if (resultCount) resultCount.textContent = `แสดง ${first.toLocaleString("th-TH")}–${last.toLocaleString("th-TH")} จาก ${state.auditLogsTotal.toLocaleString("th-TH")} รายการ`;
+    if (pageLabel) pageLabel.textContent = `หน้าละ ${pageSize} รายการ`;
+    if (pageStatus) pageStatus.textContent = `หน้า ${state.auditLogsPage.toLocaleString("th-TH")} / ${totalPages.toLocaleString("th-TH")}`;
+    if (prevButton) prevButton.disabled = state.auditLogsPage <= 1;
+    if (nextButton) nextButton.disabled = state.auditLogsPage >= totalPages;
     tbody.innerHTML = "";
 
     if (logs.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 3rem 0;">
-                    <i class="fa-regular fa-folder-open" style="font-size: 2.5rem; color: var(--text-secondary); margin-bottom: 1rem;"></i>
-                    <div style="font-size: 0.95rem;">ไม่พบรายการประวัติประวัติความปลอดภัยตามเงื่อนไขที่เลือก</div>
+                <td colspan="6" class="audit-log-empty">
+                    <i class="fa-regular fa-folder-open"></i>
+                    <div>ไม่พบรายการตามตัวกรองนี้</div>
                 </td>
             </tr>
         `;
         return;
     }
+
+    const actions = {
+        REGISTER_SUCCESS: ["ลงทะเบียนสำเร็จ", "success"],
+        REGISTER_PENDING: ["ลงทะเบียนสำรอง", "warning"],
+        REGISTRATION_UPDATED: ["เปลี่ยนชุมนุม", "info"],
+        PENDING_APPROVED: ["อนุมัติสิทธิ์", "success"],
+        PENDING_REJECTED: ["ปฏิเสธสิทธิ์", "danger"],
+        REGISTRATION_DELETED: ["ลบการลงทะเบียน", "danger"],
+        STUDENT_REGISTRATION_CANCELLED: ["นักเรียนยกเลิก", "warning"],
+        SETTINGS_UPDATED: ["แก้ไขตั้งค่า", "info"],
+        ADMIN_GRANTED: ["เพิ่มผู้ดูแล", "info"],
+        ADMIN_ENABLED: ["เปิดสิทธิ์ผู้ดูแล", "success"],
+        ADMIN_DISABLED: ["ปิดสิทธิ์ผู้ดูแล", "danger"],
+        START_NEW_TERM: ["เริ่มช่วงใหม่", "info"],
+        ROLLBACK_TO_TERM: ["ย้อนกลับช่วง", "warning"],
+        BULK_REGISTRATION_IMPORT: ["นำเข้าหลายรายการ", "info"],
+        REGISTRATION_DATA_CLEARED: ["ล้างรายการสมัคร", "danger"],
+        DEMO_DATA_RESET: ["รีเซ็ต Demo", "warning"],
+        PROMOTE_ALL_STUDENTS: ["เลื่อนชั้นนักเรียน", "info"],
+        ANONYMIZE_GRADUATED_STUDENTS: ["ปกปิดข้อมูลศิษย์เก่า", "info"],
+        DELETE_GRADUATED_STUDENT: ["ลบข้อมูลศิษย์เก่า", "danger"]
+    };
 
     logs.forEach(log => {
         const tr = document.createElement("tr");
@@ -4432,44 +4533,32 @@ function renderAdminLogs(logs = state.auditLogs) {
         }
 
         // 2. กิจกรรม (badge)
-        let badgeHtml = "";
-        if (log.action === "REGISTER_SUCCESS") {
-            badgeHtml = `<span class="ticket-status-badge" style="background: rgba(16, 185, 129, 0.15); color: var(--accent-mint); border: 1px solid rgba(16, 185, 129, 0.3);">ลงทะเบียนสำเร็จ</span>`;
-        } else if (log.action === "REGISTER_PENDING") {
-            badgeHtml = `<span class="ticket-status-badge" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.3);">ลงสำรอง (เด็กใหม่)</span>`;
-        } else if (log.action === "PENDING_APPROVED") {
-            badgeHtml = `<span class="ticket-status-badge" style="background: rgba(52, 211, 153, 0.15); color: #34d399; border: 1px solid rgba(52, 211, 153, 0.3);">ครูอนุมัติสิทธิ์</span>`;
-        } else if (log.action === "PENDING_REJECTED") {
-            badgeHtml = `<span class="ticket-status-badge" style="background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3);">ครูปฏิเสธสิทธิ์</span>`;
-        } else if (log.action === "REGISTRATION_DELETED") {
-            badgeHtml = `<span class="ticket-status-badge" style="background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3);">ยกเลิก/ลบประวัติ</span>`;
-        } else if (log.action === "SETTINGS_UPDATED") {
-            badgeHtml = `<span class="ticket-status-badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3);">ครูแก้ไขระบบ</span>`;
-        } else {
-            badgeHtml = `<span class="ticket-status-badge" style="background: rgba(156, 163, 175, 0.15); color: #9ca3af; border: 1px solid rgba(156, 163, 175, 0.3);">${log.action}</span>`;
-        }
+        const [actionLabel, actionTone] = actions[log.action] || [log.action || "กิจกรรมอื่น", "neutral"];
+        const badgeHtml = `<span class="audit-log-badge audit-log-badge--${actionTone}">${escapeHtml(actionLabel)}</span>`;
 
         // 3. นักเรียน
-        const studentStr = log.student_name 
-            ? `<strong>${log.student_name}</strong><br><span style="font-size: 0.8rem; color: var(--text-secondary);">เลขประจําตัว: ${log.student_id || '-'}</span>`
+        const studentStr = log.student_name
+            ? `<strong>${escapeHtml(log.student_name)}</strong><br><span class="audit-log-secondary">เลขประจำตัว: ${escapeHtml(log.student_id || "-")}</span>`
             : `<span style="color: var(--text-secondary);">-</span>`;
 
         // 4. ชุมนุม
-        const clubStr = log.club_name ? `<strong>${log.club_name}</strong>` : `<span style="color: var(--text-secondary);">-</span>`;
+        const clubStr = log.club_name ? `<strong>${escapeHtml(log.club_name)}</strong>` : `<span style="color: var(--text-secondary);">-</span>`;
 
         // 5. IP Address
-        const ipStr = log.ip_address ? `<code style="background: rgba(255, 255, 255, 0.05); padding: 2px 6px; border-radius: 4px; font-family: monospace; color: var(--accent-mint);">${log.ip_address}</code>` : `<span style="color: var(--text-secondary);">-</span>`;
+        const ipStr = log.ip_address ? `<code class="audit-log-ip">${escapeHtml(log.ip_address)}</code>` : `<span style="color: var(--text-secondary);">-</span>`;
 
         // 6. รายละเอียด / อุปกรณ์
         const detailsStr = `
-            <div style="font-size: 0.9rem; line-height: 1.4; color: var(--text-primary);">${log.details || '-'}</div>
-            <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 4px; display: flex; align-items: center; gap: 4px;">
-                <i class="fa-solid fa-laptop-code"></i> ${log.user_agent || 'Unknown'}
-            </div>
+            <div class="audit-log-detail-preview">${escapeHtml(log.details || "-")}</div>
+            <details class="audit-log-detail-disclosure">
+                <summary>อุปกรณ์และข้อมูลเต็ม</summary>
+                <div>${escapeHtml(log.details || "ไม่มีรายละเอียดเพิ่มเติม")}</div>
+                <small><i class="fa-solid fa-laptop-code" aria-hidden="true"></i> ${escapeHtml(log.user_agent || "ไม่ทราบอุปกรณ์")}</small>
+            </details>
         `;
 
         tr.innerHTML = `
-            <td>${dateStr}</td>
+            <td><time datetime="${escapeHtml(log.created_at || "")}">${escapeHtml(dateStr)}</time></td>
             <td>${badgeHtml}</td>
             <td>${studentStr}</td>
             <td>${clubStr}</td>
@@ -4483,40 +4572,30 @@ function renderAdminLogs(logs = state.auditLogs) {
 
 // คัดกรองข้อมูลประวัติความปลอดภัยด้วยคำค้นหาและกิจกรรม
 function filterAdminLogs() {
-    const searchVal = document.getElementById("admin-log-search-input").value.trim().toLowerCase();
-    const actionVal = document.getElementById("admin-log-action-filter").value;
+    state.auditLogsPage = 1;
+    const resultCount = document.getElementById("admin-log-result-count");
+    if (resultCount) resultCount.textContent = "กำลังค้นหาประวัติ...";
+    clearTimeout(window.auditLogFilterTimer);
+    window.auditLogFilterTimer = setTimeout(() => loadAdminLogs(), 250);
+}
 
-    let filtered = state.auditLogs;
-
-    // 1. คัดกรองตามประเภทกิจกรรม
-    if (actionVal) {
-        filtered = filtered.filter(log => log.action === actionVal);
-    }
-
-    // 2. คัดกรองตามคำค้นหา (รหัสประจำตัว, ชื่อนักเรียน, ชื่อชุมนุม, รายละเอียด หรือ IP)
-    if (searchVal) {
-        filtered = filtered.filter(log => {
-            const studentId = (log.student_id || "").toLowerCase();
-            const studentName = (log.student_name || "").toLowerCase();
-            const clubName = (log.club_name || "").toLowerCase();
-            const details = (log.details || "").toLowerCase();
-            const ip = (log.ip_address || "").toLowerCase();
-            return studentId.includes(searchVal) || 
-                   studentName.includes(searchVal) || 
-                   clubName.includes(searchVal) || 
-                   details.includes(searchVal) ||
-                   ip.includes(searchVal);
-        });
-    }
-
-    renderAdminLogs(filtered);
+function changeAdminLogsPage(delta) {
+    const pageSize = Number(document.getElementById("admin-log-page-size")?.value || 50);
+    const totalPages = Math.max(1, Math.ceil(state.auditLogsTotal / pageSize));
+    const nextPage = Math.min(totalPages, Math.max(1, state.auditLogsPage + delta));
+    if (nextPage === state.auditLogsPage) return;
+    state.auditLogsPage = nextPage;
+    loadAdminLogs();
 }
 
 // ล้างคำค้นและฟิลเตอร์ทั้งหมดเพื่อแสดงผลล็อกทั้งหมด
 function clearLogFilters() {
     document.getElementById("admin-log-search-input").value = "";
     document.getElementById("admin-log-action-filter").value = "";
-    renderAdminLogs(state.auditLogs);
+    document.getElementById("admin-log-date-filter").value = "all";
+    document.getElementById("admin-log-page-size").value = "50";
+    state.auditLogsPage = 1;
+    loadAdminLogs();
 }
 
 // =====================================================================

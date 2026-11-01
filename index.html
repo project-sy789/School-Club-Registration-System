@@ -7,7 +7,7 @@
     <meta name="description" content="ระบบสมัครเรียนและลงทะเบียนชุมนุมสำหรับนักเรียนระดับมัธยมศึกษาตอนต้นและตอนปลาย รองรับผู้เข้าใช้งานหนาแน่นอย่างรวดเร็วและปลอดภัย พร้อมระบบสำรองสิทธิ์สำหรับนักเรียนใหม่">
     
     <!-- 🎨 CSS Stylesheets & Icons -->
-    <link rel="stylesheet" href="style.css?v=1.2.7">
+    <link rel="stylesheet" href="style.css?v=1.2.8">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
     <!-- 🚀 External Libraries (Supabase and Confetti) via CDN -->
@@ -463,51 +463,64 @@
                             <input type="file" id="csv-file-input" accept=".csv, .xlsx, .xls" onchange="handleStudentCSVImport(event)">
                         </div>
 
-                        <div style="margin-top: 2rem;">
-                            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom: 0.75rem;">
-                                <h4 style="margin: 0;"><i class="fa-solid fa-database" style="color: var(--accent-mint);"></i> ฐานข้อมูลนักเรียนปัจจุบัน</h4>
-                                <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                                    <button class="btn-small-success" style="padding: 7px 14px; font-size: 0.85rem;" onclick="exportUnregisteredStudentsToCSV()" title="ส่งออกรายชื่อนักเรียนที่ยังไม่ได้ลงทะเบียนตามช่วงเวลาที่เลือก">
+                        <section class="student-directory-section" aria-labelledby="student-directory-title">
+                            <div class="student-directory-header">
+                                <div>
+                                    <h4 id="student-directory-title"><i class="fa-solid fa-database" aria-hidden="true"></i> ฐานข้อมูลนักเรียนปัจจุบัน</h4>
+                                </div>
+                                <div class="student-directory-actions">
+                                    <button class="btn-small-success" onclick="exportUnregisteredStudentsToCSV()" title="ส่งออกรายชื่อนักเรียนที่ยังไม่ได้ลงทะเบียนตามช่วงเวลาที่เลือก">
                                         <i class="fa-solid fa-file-csv"></i> ส่งออกรายชื่อยังไม่ลงทะเบียน
                                     </button>
-                                    <button class="btn-primary" style="padding: 7px 14px; font-size: 0.85rem;" onclick="openStudentCreateModal()">
+                                    <button class="btn-primary" onclick="openStudentCreateModal()">
                                         <i class="fa-solid fa-user-plus"></i> เพิ่มนักเรียนใหม่
                                     </button>
                                 </div>
                             </div>
 
-                            <!-- 🔍 ส่วนตัวกรองฐานข้อมูลนักเรียน -->
-                            <div style="display: flex; gap: 12px; margin-bottom: 15px; flex-wrap: wrap; align-items: center;">
-                                <div class="input-group" style="min-width: 235px; flex: 0 1 250px;">
-                                    <label for="admin-student-term-filter" style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 4px;">ช่วงข้อมูลการลงทะเบียน</label>
-                                    <select id="admin-student-term-filter" onchange="filterAdminStudentsList()"
-                                            style="background: #0d281a; border: var(--border-glass); color: var(--text-primary); padding: 8px 12px; border-radius: 6px; font-size: 0.9rem; width: 100%; height: 38px;">
-                                        <option value="__current__" style="background: #0d281a; color: var(--text-primary);">รอบปัจจุบัน</option>
+                            <div class="student-directory-period">
+                                <div class="student-directory-period-copy">
+                                    <span class="student-directory-eyebrow"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i> ช่วงข้อมูลการลงทะเบียน</span>
+                                    <strong id="admin-student-term-caption">กำลังเตรียมช่วงข้อมูลการลงทะเบียน...</strong>
+                                </div>
+                                <div class="student-directory-period-control">
+                                    <label for="admin-student-term-filter">เลือกช่วงเวลา</label>
+                                    <select id="admin-student-term-filter" onchange="filterAdminStudentsList()">
+                                        <option value="__current__">รอบปัจจุบัน</option>
                                     </select>
                                 </div>
-                                <div style="flex: 1; min-width: 250px; position: relative;">
+                            </div>
+                            <div class="student-directory-shortcuts" aria-label="ทางลัดช่วงข้อมูล">
+                                <span>เลือกเร็ว</span>
+                                <button type="button" data-student-term-shortcut="__current__" onclick="setStudentTermShortcut('__current__')">รอบปัจจุบัน</button>
+                                <button type="button" data-student-term-shortcut="__all__" onclick="setStudentTermShortcut('__all__')">ทุกเทอม / ทุกปี</button>
+                            </div>
+
+                            <div class="student-directory-filters" aria-label="ตัวกรองรายชื่อนักเรียน">
+                                <div class="student-directory-search">
                                     <input type="text" id="admin-student-search-input" placeholder="ค้นหารหัสประจำตัว หรือชื่อ-นามสกุล..."
-                                           onkeyup="filterAdminStudentsList()"
-                                           style="width: 100%; background: rgba(7, 23, 15, 0.7); border: var(--border-glass); color: var(--text-primary); padding: 8px 12px 8px 36px; border-radius: 6px; font-size: 0.9rem;">
-                                    <i class="fa-solid fa-magnifying-glass" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-secondary); font-size: 0.85rem;"></i>
+                                           oninput="filterAdminStudentsList()">
+                                    <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
                                 </div>
                                 <select id="admin-student-level-filter" onchange="filterAdminStudentsList()"
-                                        style="background: #0d281a; border: var(--border-glass); color: var(--text-primary); padding: 8px 12px; border-radius: 6px; font-size: 0.9rem; width: 200px; height: 38px;">
-                                    <option value="" style="background: #0d281a; color: var(--text-primary);">-- เลือกห้องเรียนทั้งหมด --</option>
+                                        aria-label="กรองตามห้องเรียน">
+                                    <option value="">ทุกห้องเรียน</option>
                                 </select>
                                 <select id="admin-student-reg-filter" onchange="filterAdminStudentsList()"
-                                        style="background: #0d281a; border: var(--border-glass); color: var(--text-primary); padding: 8px 12px; border-radius: 6px; font-size: 0.9rem; width: 200px; height: 38px;"
+                                        aria-label="กรองตามสถานะการลงทะเบียน"
                                         title="กรองตามสถานะการลงทะเบียนในช่วงเวลาที่เลือก">
-                                    <option value="all" style="background: #0d281a; color: var(--text-primary);">-- สถานะทั้งหมด --</option>
-                                    <option value="registered" style="background: #0d281a; color: var(--text-primary);">✅ ลงทะเบียนแล้ว</option>
-                                    <option value="not_registered" style="background: #0d281a; color: var(--text-primary);">⚠️ ยังไม่ลงทะเบียน</option>
+                                    <option value="all">ทุกสถานะ</option>
+                                    <option value="registered">ลงทะเบียนแล้ว</option>
+                                    <option value="not_registered">ยังไม่ลงทะเบียน</option>
                                 </select>
                             </div>
-                            <p id="admin-student-term-caption" style="color: var(--text-secondary); font-size: 0.8rem; margin: -4px 0 12px;">
-                                กำลังเตรียมช่วงข้อมูลการลงทะเบียน...
-                            </p>
 
-                            <div class="search-results-table-container" style="max-height: 350px; overflow-y: auto;">
+                            <div class="student-directory-result-meta" aria-live="polite">
+                                <strong id="admin-student-result-count">กำลังโหลดรายชื่อ...</strong>
+                                <span id="admin-student-result-status">กำลังคำนวณสถานะการลงทะเบียน</span>
+                            </div>
+
+                            <div class="search-results-table-container student-directory-table-container">
                                 <table class="data-table">
                                     <thead>
                                         <tr>
@@ -527,7 +540,7 @@
                                     </tbody>
                                 </table>
                             </div>
-                        </div>
+                        </section>
                     </div>
 
                     <!-- Sub-Tab 4.5: Bulk Import Registrations (นำเข้าลงทะเบียนชุมนุม) -->
@@ -796,28 +809,60 @@
                         </div>
 
                         <!-- 🔍 ตัวกรองและค้นหาประวัติความปลอดภัย -->
-                        <div style="display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; align-items: center;">
-                            <div style="flex: 1; min-width: 250px; position: relative;">
-                                <input type="text" id="admin-log-search-input" placeholder="ค้นหาด้วยรหัสนักเรียน, ชื่อ หรือรายละเอียด..." 
-                                       onkeyup="filterAdminLogs()"
-                                       style="width: 100%; background: rgba(7, 23, 15, 0.7); border: var(--border-glass); color: var(--text-primary); padding: 10px 12px 10px 36px; border-radius: 6px; font-size: 0.9rem; outline: none;">
-                                <i class="fa-solid fa-magnifying-glass" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-secondary); font-size: 0.85rem;"></i>
+                        <div class="audit-log-toolbar">
+                            <div class="audit-log-search">
+                                <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+                                <input type="search" id="admin-log-search-input" placeholder="ค้นหารหัสนักเรียน ชื่อ ชุมนุม IP หรือรายละเอียด..."
+                                       oninput="filterAdminLogs()" aria-label="ค้นหาประวัติความปลอดภัย">
                             </div>
                             <select id="admin-log-action-filter" onchange="filterAdminLogs()"
-                                    style="background: #0d281a; border: var(--border-glass); color: var(--text-primary); padding: 10px 12px; border-radius: 6px; font-size: 0.9rem; min-width: 180px; height: 42px; cursor: pointer; outline: none;">
-                                <option value="" style="background: #0d281a; color: var(--text-primary);">-- กิจกรรมทั้งหมด --</option>
-                                <option value="REGISTER_SUCCESS" style="background: #0d281a; color: var(--text-primary);">ลงทะเบียนสำเร็จ (เดิม)</option>
-                                <option value="REGISTER_PENDING" style="background: #0d281a; color: var(--text-primary);">ลงทะเบียนสำรอง (ใหม่)</option>
-                                <option value="PENDING_APPROVED" style="background: #0d281a; color: var(--text-primary);">ครูอนุมัติสิทธิ์</option>
-                                <option value="REGISTRATION_DELETED" style="background: #0d281a; color: var(--text-primary);">ครูยกเลิกสิทธิ์</option>
-                                <option value="SETTINGS_UPDATED" style="background: #0d281a; color: var(--text-primary);">ครูแก้ไขตั้งค่าระบบ</option>
+                                    aria-label="กรองตามกิจกรรม">
+                                <option value="">ทุกกิจกรรม</option>
+                                <option value="REGISTER_SUCCESS">ลงทะเบียนสำเร็จ</option>
+                                <option value="REGISTER_PENDING">ลงทะเบียนสำรอง</option>
+                                <option value="REGISTRATION_UPDATED">เปลี่ยนชุมนุม</option>
+                                <option value="PENDING_APPROVED">อนุมัติสิทธิ์</option>
+                                <option value="PENDING_REJECTED">ปฏิเสธสิทธิ์</option>
+                                <option value="REGISTRATION_DELETED">ลบ/ยกเลิกการลงทะเบียน</option>
+                                <option value="STUDENT_REGISTRATION_CANCELLED">นักเรียนยกเลิกเอง</option>
+                                <option value="SETTINGS_UPDATED">แก้ไขตั้งค่าระบบ</option>
+                                <option value="ADMIN_GRANTED">เพิ่มผู้ดูแล</option>
+                                <option value="ADMIN_ENABLED">เปิดสิทธิ์ผู้ดูแล</option>
+                                <option value="ADMIN_DISABLED">ปิดสิทธิ์ผู้ดูแล</option>
+                                <option value="START_NEW_TERM">เริ่มช่วงลงทะเบียนใหม่</option>
+                                <option value="ROLLBACK_TO_TERM">ย้อนกลับช่วงลงทะเบียน</option>
+                                <option value="BULK_REGISTRATION_IMPORT">นำเข้าการลงทะเบียนจำนวนมาก</option>
+                                <option value="REGISTRATION_DATA_CLEARED">ล้างรายการลงทะเบียน</option>
+                                <option value="DEMO_DATA_RESET">รีเซ็ตข้อมูล Demo</option>
+                                <option value="PROMOTE_ALL_STUDENTS">เลื่อนชั้นนักเรียน</option>
+                                <option value="ANONYMIZE_GRADUATED_STUDENTS">ปกปิดข้อมูลศิษย์เก่า</option>
+                                <option value="DELETE_GRADUATED_STUDENT">ลบข้อมูลศิษย์เก่า</option>
                             </select>
-                            <button class="btn-secondary" onclick="clearLogFilters()" style="padding: 10px 15px; border-radius: 6px; font-size: 0.9rem; display: flex; align-items: center; gap: 6px; height: 42px; cursor: pointer;">
+                            <select id="admin-log-date-filter" onchange="filterAdminLogs()" aria-label="กรองตามช่วงเวลา">
+                                <option value="all">ทุกช่วงเวลา</option>
+                                <option value="7">7 วันล่าสุด</option>
+                                <option value="30">30 วันล่าสุด</option>
+                                <option value="90">90 วันล่าสุด</option>
+                            </select>
+                            <select id="admin-log-page-size" onchange="filterAdminLogs()" aria-label="จำนวนรายการต่อหน้า">
+                                <option value="25">25 รายการ</option>
+                                <option value="50" selected>50 รายการ</option>
+                                <option value="100">100 รายการ</option>
+                            </select>
+                            <button class="btn-secondary" onclick="clearLogFilters()" title="ล้างตัวกรองทั้งหมด">
                                 <i class="fa-solid fa-rotate-left"></i> ล้างตัวกรอง
+                            </button>
+                            <button class="btn-secondary" onclick="loadAdminLogs()" title="โหลดรายการล่าสุด">
+                                <i class="fa-solid fa-arrows-rotate"></i><span class="audit-refresh-label">รีเฟรช</span>
                             </button>
                         </div>
 
-                        <div class="search-results-table-container" style="max-height: 480px; overflow-y: auto;">
+                        <div class="audit-log-meta" aria-live="polite">
+                            <strong id="admin-log-result-count">กำลังโหลดประวัติ...</strong>
+                            <span id="admin-log-page-label"></span>
+                        </div>
+
+                        <div class="search-results-table-container audit-log-table-container">
                             <table class="data-table">
                                 <thead>
                                     <tr>
@@ -826,18 +871,25 @@
                                         <th>นักเรียน</th>
                                         <th>ชุมนุม</th>
                                         <th>IP</th>
-                                        <th>อุปกรณ์/รายละเอียด</th>
+                                        <th>รายละเอียด</th>
                                     </tr>
                                 </thead>
                                 <tbody id="admin-logs-tbody">
                                     <tr>
-                                        <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 3rem 0;">
+                                        <td colspan="6" class="audit-log-empty">
                                             <i class="fa-solid fa-circle-notch fa-spin" style="font-size: 2rem; color: var(--accent-mint); margin-bottom: 1rem;"></i>
                                             <p>กำลังดาวน์โหลดบันทึกประวัติความปลอดภัย...</p>
                                         </td>
                                     </tr>
                                 </tbody>
                             </table>
+                        </div>
+                        <div class="audit-log-pagination" aria-label="แบ่งหน้าประวัติความปลอดภัย">
+                            <span id="admin-log-page-status">หน้า 1</span>
+                            <div>
+                                <button type="button" id="admin-log-prev" class="btn-secondary" onclick="changeAdminLogsPage(-1)"><i class="fa-solid fa-chevron-left"></i> ก่อนหน้า</button>
+                                <button type="button" id="admin-log-next" class="btn-secondary" onclick="changeAdminLogsPage(1)">ถัดไป <i class="fa-solid fa-chevron-right"></i></button>
+                            </div>
                         </div>
                     </div>
 
