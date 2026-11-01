@@ -462,7 +462,8 @@
                             <i class="fa-solid fa-file-excel" style="color: var(--accent-mint);"></i>
                             <h4>ลากไฟล์ .csv หรือ .xlsx มาวางที่นี่ หรือคลิกเพื่ออัปโหลด</h4>
                             <p style="color: var(--text-secondary); font-size: 0.85rem;">
-                                โครงสร้างคอลัมน์ของไฟล์ Excel/CSV: <strong>student_id, prefix, first_name, last_name, level</strong> (หรือแบบเดิมไม่มี prefix ก็รองรับอัตโนมัติ)
+                                โครงสร้างคอลัมน์ของไฟล์ Excel/CSV: <strong>student_id, prefix, first_name, last_name, level, national_id</strong>
+                                <br><small>ใส่เลขบัตรประชาชนเต็ม 13 หลักใน <code>national_id</code> ระบบจะสร้างข้อมูลเลขท้าย 4 หลักสำหรับยืนยันประวัติให้อัตโนมัติ และจะไม่แสดงเลขบัตรเต็มในตาราง</small>
                             </p>
                             <input type="file" id="csv-file-input" accept=".csv, .xlsx, .xls" onchange="handleStudentCSVImport(event)">
                         </div>
@@ -533,13 +534,14 @@
                                             <th>ชื่อจริง</th>
                                             <th>นามสกุล</th>
                                             <th>ห้องเรียน</th>
+                                            <th title="ไม่แสดงเลขบัตรจริงในรายการ">ข้อมูลยืนยันตัวตน</th>
                                             <th>สถานะลงทะเบียน</th>
                                             <th style="width: 110px; text-align:center;">การจัดการ</th>
                                         </tr>
                                     </thead>
                                     <tbody id="admin-students-list-tbody">
                                         <tr>
-                                            <td colspan="7" style="text-align: center; color: var(--text-muted);">ไม่พบรายชื่อในฐานข้อมูล หรือกำลังดาวน์โหลด...</td>
+                                            <td colspan="8" style="text-align: center; color: var(--text-muted);">ไม่พบรายชื่อในฐานข้อมูล หรือกำลังดาวน์โหลด...</td>
                                         </tr>
                                     </tbody>
                                 </table>
@@ -1345,8 +1347,9 @@
                 </div>
 
                 <div class="input-group" style="grid-column: span 2;">
-                    <label for="student-edit-identity">เลขบัตรประชาชน (แยกจากรหัสนักเรียน) 13 หลัก หรือเลขท้าย 4 หลัก</label>
-                    <input type="password" id="student-edit-identity" placeholder="เลขเต็มใช้ค้นหาข้อมูลเดิม; เลขท้าย 4 หลักใช้ยืนยันประวัติ" inputmode="numeric" maxlength="13" autocomplete="new-password">
+                    <label for="student-edit-identity">เลขบัตรประชาชน (แยกจากรหัสนักเรียน) 13 หลัก</label>
+                    <input type="password" id="student-edit-identity" placeholder="กรอกเลขบัตรประชาชน 13 หลัก ระบบจะใช้ 4 หลักท้ายยืนยันประวัติ" inputmode="numeric" maxlength="13" autocomplete="new-password">
+                    <small style="color:var(--text-secondary);">ระบบจะไม่แสดงหรือเก็บเลขบัตรเป็นข้อความปกติ แต่จะสร้างค่าปลอดภัยสำหรับค้นหาและยืนยันตัวตน</small>
                 </div>
             </div>
 

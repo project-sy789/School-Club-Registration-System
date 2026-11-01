@@ -3114,7 +3114,7 @@ async function loadStudentsList() {
     if (resultStatus) resultStatus.textContent = "กำลังคำนวณสถานะการลงทะเบียน";
 
     try {
-        let query = supabaseClient.from("students").select("*");
+        let query = supabaseClient.from("students").select("student_id, prefix, first_name, last_name, level, status, identity_last4_hash, national_id_hash");
 
         if (searchVal) {
             // หากเป็นตัวเลขล้วนให้ค้นหารหัสประจำตัวนักเรียน
@@ -3148,6 +3148,7 @@ async function loadStudentsList() {
         } else if (regFilter === "not_registered") {
             rows = rows.filter(s => !regMap.has(String(s.student_id)));
         }
+        rows.sort((a, b) => String(a.student_id || "").localeCompare(String(b.student_id || ""), "en", { numeric: true, sensitivity: "base" }));
         const matchedRegistered = rows.filter(student => regMap.has(String(student.student_id))).length;
         if (resultCount) resultCount.textContent = `แสดง ${rows.length.toLocaleString("th-TH")} คน`;
         if (resultStatus) {
@@ -3160,6 +3161,11 @@ async function loadStudentsList() {
                 const row = document.createElement("tr");
                 const safeId = String(std.student_id).replace(/'/g, "\\'");
                 const registrations = regMap.get(String(std.student_id)) || [];
+                const identityStatusHtml = std.national_id_hash && std.identity_last4_hash
+                    ? '<span title="เลขบัตร 13 หลักพร้อมใช้ค้นหาและยืนยันตัวตน ระบบไม่แสดงเลขจริง" style="color:var(--status-success);">เลขบัตรพร้อมใช้</span>'
+                    : std.identity_last4_hash
+                        ? '<span title="มีข้อมูลเลขท้าย 4 หลักเดิม ควรนำเข้าเลขบัตรเต็ม 13 หลักเพื่อใช้ค้นหารหัสนักเรียน" style="color:var(--status-warning);">ข้อมูลเดิม · ต้องเพิ่มเลขเต็ม</span>'
+                        : '<span title="ยังไม่มีเลขบัตรสำหรับยืนยันตัวตน" style="color:var(--text-muted);">ยังไม่ตั้งค่า</span>';
                 let statusHtml;
                 if (registrations.length > 0) {
                     const clubNames = [...new Set(registrations.map(reg => reg.clubs?.name || "ไม่ระบุชุมนุม"))];
@@ -3178,11 +3184,12 @@ async function loadStudentsList() {
                     statusHtml = `<span style="display:inline-block; background:rgba(245,158,11,0.15); color:#fbbf24; border:1px solid rgba(245,158,11,0.3); padding:3px 8px; border-radius:10px; font-size:0.78rem; font-weight:600;">⚠️ ยังไม่ลงทะเบียน</span>`;
                 }
                 row.innerHTML = `
-                    <td><strong>${std.student_id}</strong></td>
-                    <td>${std.prefix || "-"}</td>
-                    <td>${std.first_name}</td>
-                    <td>${std.last_name}</td>
-                    <td>${std.level}</td>
+                    <td><strong>${escapeHtml(std.student_id)}</strong></td>
+                    <td>${escapeHtml(std.prefix || "-")}</td>
+                    <td>${escapeHtml(std.first_name || "-")}</td>
+                    <td>${escapeHtml(std.last_name || "-")}</td>
+                    <td>${escapeHtml(std.level || "-")}</td>
+                    <td>${identityStatusHtml}</td>
                     <td>${statusHtml}</td>
                     <td>
                         <div style="display:flex; gap:6px; justify-content:center;">
@@ -3203,7 +3210,7 @@ async function loadStudentsList() {
                 : regFilter === "not_registered"
                     ? `ไม่พบนักเรียนที่ยังไม่ลงทะเบียนใน${getStudentTermFilterLabel(termFilter)}ตามเงื่อนไขการค้นหา`
                     : "ไม่พบข้อมูลนักเรียนที่ตรงตามเงื่อนไขการค้นหา";
-            tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 1.5rem 0;">${emptyMsg}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 1.5rem 0;">${emptyMsg}</td></tr>`;
         }
 
         // ดึงรายการห้องทั้งหมดมาใส่ใน dropdown
@@ -3214,7 +3221,7 @@ async function loadStudentsList() {
         const resultStatus = document.getElementById("admin-student-result-status");
         if (resultCount) resultCount.textContent = "โหลดรายชื่อไม่สำเร็จ";
         if (resultStatus) resultStatus.textContent = "ตรวจสอบการเชื่อมต่อฐานข้อมูลแล้วลองใหม่อีกครั้ง";
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--status-danger);">ไม่สามารถดาวน์โหลดรายชื่อจากฐานข้อมูลได้</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--status-danger);">ไม่สามารถดาวน์โหลดรายชื่อจากฐานข้อมูลได้</td></tr>`;
     }
 }
 
@@ -3240,7 +3247,7 @@ async function exportUnregisteredStudentsToCSV() {
         const levelVal = (document.getElementById("admin-student-level-filter")?.value || "").trim();
         const termFilter = getStudentTermFilterValue();
 
-        let query = supabaseClient.from("students").select("*");
+        let query = supabaseClient.from("students").select("student_id, prefix, first_name, last_name, level, status");
         if (searchVal) {
             if (/^\d+$/.test(searchVal)) {
                 query = query.ilike("student_id", `%${searchVal}%`);
@@ -3282,7 +3289,7 @@ async function openStudentEditModal(studentId) {
     try {
         const { data, error } = await supabaseClient
             .from("students")
-            .select("*")
+            .select("student_id, prefix, first_name, last_name, level, status")
             .eq("student_id", studentId)
             .maybeSingle();
         if (error) throw error;
@@ -3352,9 +3359,14 @@ async function saveStudentRecord() {
     const lastName = document.getElementById("student-edit-last-name").value.trim();
     const level = document.getElementById("student-edit-level").value.trim();
     const identity = document.getElementById("student-edit-identity").value.trim();
+    const identityDigits = identity.replace(/\D/g, "");
 
     if (!newId || !firstName || !lastName || !level) {
         showToast("กรุณากรอกรหัสประจำตัว, ชื่อจริง, นามสกุล และระดับชั้นให้ครบถ้วน", "warning");
+        return;
+    }
+    if (identity && identityDigits.length !== 13) {
+        showToast("กรุณากรอกเลขบัตรประชาชนให้ครบ 13 หลัก", "warning");
         return;
     }
 
@@ -3403,7 +3415,7 @@ async function saveStudentRecord() {
         if (identity) {
             const { data: identityResult, error: identityError } = await supabaseClient.rpc("admin_set_student_identity_last4", {
                 p_student_id: newId,
-                p_identity: identity
+                p_identity: identityDigits
             });
             if (identityError) throw identityError;
             if (!identityResult?.success) throw new Error(identityResult?.message || "บันทึกข้อมูลยืนยันตัวตนไม่สำเร็จ");
@@ -3557,7 +3569,11 @@ async function handleStudentCSVImport(event) {
                 const first_name = row[firstNameIdx] ? String(row[firstNameIdx]).trim() : '';
                 const last_name = row[lastNameIdx] ? String(row[lastNameIdx]).trim() : '';
                 const level = row[levelIdx] ? String(row[levelIdx]).trim() : '';
-                const identity = identityIdx !== -1 && row[identityIdx] ? String(row[identityIdx]).trim() : '';
+                const identity = identityIdx !== -1 && row[identityIdx] ? String(row[identityIdx]).replace(/\D/g, '') : '';
+
+                if (identity && identity.length !== 13) {
+                    throw new Error(`แถว ${i + 1}: เลขบัตรประชาชนต้องมี 13 หลัก`);
+                }
 
                 if (student_id && first_name) {
                     batch.push({
@@ -3586,6 +3602,14 @@ async function handleStudentCSVImport(event) {
             const identityRows = dedupedBatch
                 .filter(row => row._identity)
                 .map(row => ({ student_id: row.student_id, national_id: row._identity }));
+            const nationalIdOwners = new Map();
+            for (const row of identityRows) {
+                const existingStudentId = nationalIdOwners.get(row.national_id);
+                if (existingStudentId && existingStudentId !== row.student_id) {
+                    throw new Error("เลขบัตรประชาชนเดียวกันถูกใส่ให้รหัสนักเรียนมากกว่าหนึ่งคน");
+                }
+                nationalIdOwners.set(row.national_id, row.student_id);
+            }
             const upsertBatch = dedupedBatch.map(({ _identity, ...row }) => row);
             const duplicateCount = batch.length - dedupedBatch.length;
 
@@ -3606,7 +3630,9 @@ async function handleStudentCSVImport(event) {
                     p_rows: identityRows
                 });
                 if (identityError) throw identityError;
-                if (!identityResult?.success) throw new Error(identityResult?.message || "บันทึกข้อมูลยืนยันตัวตนไม่สำเร็จ");
+                if (!identityResult?.success || Number(identityResult.updated) !== identityRows.length) {
+                    throw new Error(identityResult?.message || "บันทึกเลขบัตรไม่ครบทุกคน กรุณาตรวจเลขบัตรซ้ำหรือข้อมูลนักเรียน");
+                }
             }
 
             showToast(`นำเข้าฐานข้อมูลรายชื่อนักเรียนสำเร็จรวม ${batch.length} รายการ!`, "success");
@@ -3966,7 +3992,7 @@ function downloadStudentTemplate() {
     }
 
     const data = [
-        ["student_id", "prefix", "first_name", "last_name", "level", "national_id_or_last4"],
+        ["student_id", "prefix", "first_name", "last_name", "level", "national_id"],
         ["10001", "เด็กชาย", "สมชาย", "ใจดี", "ม.1/1", ""],
         ["10002", "เด็กหญิง", "สมหญิง", "รักเรียน", "ม.1/2", ""],
         ["10003", "นาย", "ศรัญญู", "มุ่งมั่น", "ม.4/3", ""],
@@ -3982,7 +4008,7 @@ function downloadStudentTemplate() {
         { wch: 15 }, // first_name
         { wch: 15 }, // last_name
         { wch: 10 }, // level
-        { wch: 22 }  // national_id_or_last4
+        { wch: 18 }  // national_id
     ];
 
     const wb = XLSX.utils.book_new();
@@ -5012,7 +5038,7 @@ async function handleAdminStudentIdChange() {
     try {
         const { data, error } = await supabaseClient
             .from("students")
-            .select("*")
+            .select("student_id, prefix, first_name, last_name, level")
             .eq("student_id", studentId)
             .maybeSingle();
 

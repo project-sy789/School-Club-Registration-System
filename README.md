@@ -15,7 +15,7 @@
 * **ดีไซน์พรีเมียมสีเขียวเอมเมอรัลด์ (Premium Emerald Glassmorphism):** หน้าเว็บตอบสนองรวดเร็ว ลื่นไหล มีเอฟเฟกต์สะท้อนแสง ทรานซิชันสวยงาม และรองรับการแสดงผลแบบ Responsive ในมือถือ 100%
 * **ระบบตัวจับเวลาเปิด-ปิดอัตโนมัติ (Dynamic Live Countdown):** แสดงผลเวลาเปิดรับสมัครนับถอยหลังระดับมิลลิวินาที และเปิด/ปิดระบบให้ลงทะเบียนได้โดยอัตโนมัติโดยที่นักเรียนไม่ต้องกดรีเฟรชหน้าเว็บ
 * **ระบบตัดยอดที่นั่งปลอดภัยสูงสุด (Row Lock Atomic Seats):** ใช้ฟังก์ชัน Stored Procedure บน PostgreSQL (`FOR UPDATE`) ในการล็อกที่นั่งก่อนเขียนทับ ทำให้มั่นใจว่าไม่มีทางเกิดปัญหา "ที่นั่งเรียนเกินโควตา" แม้จะยิงจองเข้ามาพร้อมกันในเสี้ยววินาทีเดียวกัน
-* **Flow ยืนยันตัวตนและนักเรียนใหม่แบบ Pending:** รหัสนักเรียนและเลขบัตรประชาชนเป็นคนละข้อมูล นักเรียนเดิมค้นหาได้ด้วยรหัสนักเรียน หรือใช้เลขบัตรประชาชน 13 หลักเพื่อค้นหารหัสนักเรียนจริง (ระบบเก็บเฉพาะ HMAC ของเลขบัตร) ส่วนนักเรียนที่ยังไม่มีข้อมูลกรอกเบอร์โทร 10 หลัก รายการจะกันที่นั่งแบบมาก่อนได้ก่อนและรอผู้ดูแลจับคู่กับรหัสนักเรียนจริง ชื่อ-นามสกุลไม่ถือเป็นตัวระบุที่ไม่ซ้ำ เพราะนักเรียนต่างชั้นอาจชื่อเหมือนกัน
+  * **Flow ยืนยันตัวตนและนักเรียนใหม่แบบ Pending:** รหัสนักเรียนและเลขบัตรประชาชนเป็นคนละข้อมูล ผู้ดูแลนำเข้าเลขบัตรประชาชนเต็ม 13 หลัก ระบบจะเก็บเฉพาะ HMAC ของเลขเต็มและ HMAC ของ 4 หลักท้าย นักเรียนเดิมค้นหาได้ด้วยรหัสนักเรียนหรือเลขบัตร 13 หลัก ส่วนนักเรียนที่ยังไม่มีข้อมูลกรอกเบอร์โทร 10 หลัก รายการจะกันที่นั่งแบบมาก่อนได้ก่อนและรอผู้ดูแลจับคู่กับรหัสนักเรียนจริง
 * **การบูรณาการคำนำหน้าชื่อตามมาตรฐานไทย (Title Prefix Integration) 🆕:** รองรับข้อมูลคำนำหน้าชื่อ (เด็กชาย, เด็กหญิง, นาย, นางสาว) ในระดับตารางฐานข้อมูลและหน้ารายงานผลทั้งหมด แสดงผลการรวมชื่อตามหลักไวยากรณ์ไทยอย่างเป็นทางการ (เช่น `นายสมชาย ใจดี` เขียนติดกันโดยไม่มีช่องว่างระหว่างคำนำหน้าและชื่อจริง) พร้อมระบบอัพโหลดแบบตรวจจับหัวตารางอัจฉริยะ (Header Detection Mapper) รองรับการนำเข้าไฟล์รายชื่อผ่าน Excel/CSV ทั้งแบบ 4 คอลัมน์เดิม และ 5 คอลัมน์ใหม่ได้อย่างปลอดภัย 100%
 * **ระบบผู้ดูแลระบบอัจฉริยะ (Admin Dashboard):**
   * **รายงานสรุปเรียลไทม์:** รายงานสัดส่วนการจอง สถิติจำนวนที่นั่งของแต่ละชุมนุม
@@ -23,7 +23,7 @@
   * **ระบบอนุมัติเด็กใหม่:** แสดงตารางจัดการเด็กสมัครใหม่พร้อมกรอกรหัสและยืนยันตัวตน หรือสลับยกเลิกสิทธิ์
   * **จัดการชุมนุม:** ฟอร์มเพิ่ม ลบ หรือแก้ไขรายละเอียดชุมนุม ครูผู้สอน สถานที่เรียน โควตา และช่วงชั้นที่รับสมัคร (ม.1 - ม.6)
   * **ระบบ Bulk Import รายชื่อชุมนุม:** นำเข้ารายชื่อชุมนุมและโควตาทั้งหมดของโรงเรียนได้ในคลิกเดียวผ่านไฟล์ `.csv` 🆕
-  * **ระบบ Bulk Import รายชื่อเด็ก:** นำเข้ารายชื่อนักเรียนเก่าได้เพียงลากและวางไฟล์ `.csv` ประมวลผลรวดเร็วผ่านคำสั่ง Upsert Batch
+  * **ระบบ Bulk Import รายชื่อเด็ก:** นำเข้าไฟล์ `.csv`/`.xlsx` ด้วยคอลัมน์ `student_id, prefix, first_name, last_name, level, national_id` โดยใส่เลขบัตรเต็ม 13 หลัก ระบบแปลงเก็บเป็น HMAC ของเลขเต็มและเลขท้าย 4 หลัก และตารางจัดการแสดงเฉพาะสถานะว่าตั้งค่าแล้ว ไม่แสดงเลขบัตร
   * **ระบบ Bulk Import การลงทะเบียนชุมนุม (Admin Pre-Registration) 🆕:** ใช้คอลัมน์ `student_id, prefix, first_name, last_name, level, phone, club_name` — นักเรียนที่มีทะเบียนให้ใส่รหัสจริง ส่วนนักเรียนใหม่ให้เว้น `student_id` และใส่เบอร์โทร 10 หลัก ระบบจะเก็บเฉพาะ HMAC และเลขท้าย 4 หลัก ไม่เก็บเบอร์เต็ม แถวที่มีรหัสตรงกับฐานข้อมูลจะเป็น Verified ทันที ส่วนรายการใหม่จะเป็น Pending พร้อมเคารพโควตาและป้องกันการลงทะเบียนซ้ำ
   * **ส่งออกเอกสาร Excel (Thai BOM CSV Export):** ส่งออกรายชื่อนักเรียนแยกตามชุมนุมหรือรวมทั้งโรงเรียนเป็นไฟล์ CSV ที่รองรับอักษรไทยสมบูรณ์แบบ เปิดใน Excel ภาษาไม่เพี้ยน ไม่เป็นตัวต่างดาว มีคอลัมน์คำนำหน้าชื่อแยกเรียบร้อย
   * **ประวัติและรายงานการลงทะเบียน:** นักเรียนเปิดดูประวัติของตนเองย้อนหลังได้ทุกปี/ภาคเรียน ส่วนผู้ดูแลเลือกช่วงเวลาและจัดกลุ่มรายงานตามระดับชั้นหรือชุมนุม แล้วส่งออกเป็น Excel สรุป+รายชื่อ หรือพิมพ์เป็น PDF ได้ โดยรายการ Pending แสดงเลขท้ายเบอร์ 4 หลักแทนเบอร์เต็ม
@@ -42,7 +42,7 @@
 > ## ⚡ ตั้งค่าหลัก
 > เหมาะสำหรับครู/ผู้ดูแลโรงเรียนที่ต้องการเปิดระบบออนไลน์:
 > 1. **กดปุ่ม `Fork`** ที่มุมขวาบนของหน้านี้บน GitHub → ตั้งค่าเป็น **Private** (ดู [ทางเลือกที่ 2](#-ทางเลือกที่-2-เปลี่ยนเป็นคลังเก็บโค้ดส่วนตัว-private-repository--deploy-ผ่านผู้ให้บริการฟรี) เพื่อกัน API key หลุด)
-> 2. **สมัคร Supabase** (ฟรี) → รัน [`supabase/setup_database.sql`](supabase/setup_database.sql) ตามด้วย [`supabase/migrate_backend_hardening.sql`](supabase/migrate_backend_hardening.sql), [`supabase/migrate_student_identity_and_limits.sql`](supabase/migrate_student_identity_and_limits.sql) และ [`supabase/migrate_bulk_pending_phone.sql`](supabase/migrate_bulk_pending_phone.sql) ใน SQL Editor → คัดลอก **Project URL + anon Key** เก็บไว้
+> 2. **สมัคร Supabase** (ฟรี) → รัน [`supabase/setup_database.sql`](supabase/setup_database.sql) ตามด้วย [`supabase/migrate_backend_hardening.sql`](supabase/migrate_backend_hardening.sql), [`supabase/migrate_student_identity_and_limits.sql`](supabase/migrate_student_identity_and_limits.sql), [`supabase/migrate_require_full_national_id.sql`](supabase/migrate_require_full_national_id.sql) และ [`supabase/migrate_bulk_pending_phone.sql`](supabase/migrate_bulk_pending_phone.sql) ใน SQL Editor → คัดลอก **Project URL + anon Key** เก็บไว้
 > 3. ที่ Fork ของคุณบน GitHub → เปิดไฟล์ **`config.js`** → กดรูป **ดินสอ ✏️** มุมขวาบน → นำ URL และ Key มาวางในเครื่องหมาย `""` ของตัวแปร `SUPABASE_CONFIG` → กด **Commit changes** ✅
 > 4. ไปแท็บ **Settings → Pages → Source: Deploy from a branch → เลือก `main` → Save** ✅
 > 5. สร้างบัญชีผู้ดูแลคนแรกใน Supabase Auth และ bootstrap สิทธิ์ครั้งเดียวตามคู่มือด้านล่าง → หลังจาก deploy ฟังก์ชันเชิญครั้งเดียวแล้ว สามารถเชิญ/ปิดสิทธิ์ผู้ดูแลคนอื่นจากเมนู **จัดการผู้ดูแล** ได้โดยไม่ต้องเข้า SQL Editor ซ้ำ
@@ -57,14 +57,14 @@
 2. กดปุ่ม **Create a new project** ตั้งชื่อโครงการและรหัสผ่านฐานข้อมูลให้เรียบร้อย (แนะนำให้เลือก Region เป็น **Singapore** เพื่อความรวดเร็วในการโหลดข้อมูลในประเทศไทย)
 3. เมื่อสร้างโครงการเสร็จสมบูรณ์แล้ว ให้คลิกเมนู **SQL Editor** ที่แถบเครื่องมือซ้ายมือ (สัญลักษณ์รูป `SQL`)
 4. คลิกปุ่ม **New Query**
-5. คัดลอกเนื้อหาจากไฟล์ [supabase/setup_database.sql](supabase/setup_database.sql) มาวางและกด **Run** จากนั้นรันตามลำดับ: [supabase/migrate_backend_hardening.sql](supabase/migrate_backend_hardening.sql), [supabase/migrate_student_identity_and_limits.sql](supabase/migrate_student_identity_and_limits.sql) และ [supabase/migrate_bulk_pending_phone.sql](supabase/migrate_bulk_pending_phone.sql)
+5. คัดลอกเนื้อหาจากไฟล์ [supabase/setup_database.sql](supabase/setup_database.sql) มาวางและกด **Run** จากนั้นรันตามลำดับ: [supabase/migrate_backend_hardening.sql](supabase/migrate_backend_hardening.sql), [supabase/migrate_student_identity_and_limits.sql](supabase/migrate_student_identity_and_limits.sql), [supabase/migrate_require_full_national_id.sql](supabase/migrate_require_full_national_id.sql) และ [supabase/migrate_bulk_pending_phone.sql](supabase/migrate_bulk_pending_phone.sql)
 6. **คัดลอกรหัสเชื่อมต่อ:** ไปที่เมนู **Settings** (รูปฟันเฟืองซ้ายล่าง) > **API** แล้วทำการคัดลอกค่า 2 ค่าต่อไปนี้เก็บไว้:
    * **Project URL** (เช่น `https://xxxxxx.supabase.co`)
    * **anon (public) Key** (รหัสคีย์สาธารณะขนาดยาว)
 
 ### ข้อมูล Demo: รีเซ็ตและเรียกข้อมูลตัวอย่างกลับมา
 
-ใช้ไฟล์ [`supabase/demo_reset.sql`](supabase/demo_reset.sql) เมื่อต้องการล้างข้อมูลทดลองแล้วสร้างข้อมูลตัวอย่างกลับมาใหม่ โดยเปิดไฟล์นี้ใน **Supabase → SQL Editor** แล้วกด **Run** หลังจากติดตั้ง `setup_database.sql`, `migrate_backend_hardening.sql`, `migrate_student_identity_and_limits.sql` และ `migrate_bulk_pending_phone.sql` แล้ว
+ใช้ไฟล์ [`supabase/demo_reset.sql`](supabase/demo_reset.sql) เมื่อต้องการล้างข้อมูลทดลองแล้วสร้างข้อมูลตัวอย่างกลับมาใหม่ โดยเปิดไฟล์นี้ใน **Supabase → SQL Editor** แล้วกด **Run** หลังจากติดตั้ง migration ทั้งหมด รวมถึง `migrate_require_full_national_id.sql` แล้ว
 
 เมื่อติดตั้ง migration เวอร์ชันล่าสุดแล้ว ผู้ดูแลสามารถทำงานนี้จากหน้าเว็บได้ที่ **หลังบ้าน → ตั้งค่าระบบ → เครื่องมือข้อมูลสาธิต** โดยปุ่มจะให้พิมพ์คำยืนยัน `RESET DEMO DATA` ก่อนล้างและโหลดข้อมูลใหม่ และมีปุ่ม `ล้างเฉพาะรายการลงทะเบียน` สำหรับเริ่มรอบทดลองใหม่โดยเก็บรายชื่อนักเรียนกับชุมนุมไว้
 
@@ -150,7 +150,7 @@ on conflict (user_id)
 do update set role = 'admin', enabled = true;
 ```
 
-หากเป็นระบบที่ติดตั้งอยู่แล้ว ให้รัน [`supabase/migrate_bulk_pending_phone.sql`](supabase/migrate_bulk_pending_phone.sql) ใน SQL Editor หลังจากติดตั้ง migration สองไฟล์ก่อนหน้าแล้ว เพื่อให้ Bulk Import รองรับนักเรียนใหม่ด้วยเบอร์โทรและรายงานไม่เปิดเผยเบอร์เต็ม
+หากเป็นระบบที่ติดตั้งอยู่แล้ว ให้รัน [`supabase/migrate_require_full_national_id.sql`](supabase/migrate_require_full_national_id.sql) และ [`supabase/migrate_bulk_pending_phone.sql`](supabase/migrate_bulk_pending_phone.sql) ใน SQL Editor หลังจากติดตั้ง migration ก่อนหน้าแล้ว เพื่อบังคับเลขบัตรเต็ม 13 หลักและให้ Bulk Import รองรับนักเรียนใหม่ด้วยเบอร์โทร
 
 3. deploy ฟังก์ชันเชิญผู้ดูแล [`supabase/functions/admin-invite-user/index.ts`](supabase/functions/admin-invite-user/index.ts) หนึ่งครั้งต่อโปรเจกต์ โดยใช้ Project ref จาก URL ของโปรเจกต์:
 

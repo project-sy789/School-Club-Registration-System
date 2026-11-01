@@ -37,8 +37,8 @@ CREATE TABLE IF NOT EXISTS private.student_identity_attempts (
 );
 REVOKE ALL ON private.student_identity_attempts FROM PUBLIC, anon, authenticated;
 
--- Admins can enter a full national ID or only its final four digits. The
--- browser calls this RPC so the private HMAC secret never leaves Postgres.
+-- Admins enter the full national ID. The RPC derives the final-four hash for
+-- verification while keeping the private HMAC secret inside Postgres.
 CREATE OR REPLACE FUNCTION public.admin_set_student_identity_last4(
     p_student_id TEXT,
     p_identity TEXT
@@ -58,8 +58,8 @@ BEGIN
     IF NOT is_admin() THEN
         RAISE EXCEPTION 'not authorized';
     END IF;
-    IF v_student_id IS NULL OR v_digits !~ '^([0-9]{4}|[0-9]{13})$' THEN
-        RETURN jsonb_build_object('success', false, 'code', 'INVALID_IDENTITY', 'message', 'กรุณากรอกเลขบัตรประชาชนหรือเลขท้าย 4 หลัก');
+    IF v_student_id IS NULL OR v_digits !~ '^[0-9]{13}$' THEN
+        RETURN jsonb_build_object('success', false, 'code', 'INVALID_NATIONAL_ID', 'message', 'กรุณากรอกเลขบัตรประชาชนให้ครบ 13 หลัก');
     END IF;
 
     v_last4 := right(v_digits, 4);
@@ -67,7 +67,7 @@ BEGIN
     FROM private.registration_secrets
     WHERE name = 'student_identity_hmac';
 
-    IF length(v_digits) = 13 AND EXISTS (
+    IF EXISTS (
         SELECT 1
         FROM students
         WHERE national_id_hash = encode(hmac(convert_to(v_digits, 'UTF8'), v_secret, 'sha256'::text), 'hex')
@@ -78,11 +78,7 @@ BEGIN
 
     UPDATE students
     SET identity_last4_hash = encode(hmac(convert_to(v_last4, 'UTF8'), v_secret, 'sha256'::text), 'hex'),
-        national_id_hash = CASE
-            WHEN length(v_digits) = 13
-            THEN encode(hmac(convert_to(v_digits, 'UTF8'), v_secret, 'sha256'::text), 'hex')
-            ELSE national_id_hash
-        END
+        national_id_hash = encode(hmac(convert_to(v_digits, 'UTF8'), v_secret, 'sha256'::text), 'hex')
     WHERE student_id = v_student_id;
     GET DIAGNOSTICS v_updated = ROW_COUNT;
 
