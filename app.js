@@ -2809,30 +2809,38 @@ async function populateRegistrationLevelDropdown(force = false) {
             levelSelect.appendChild(customOpt);
             
             hasPopulatedRegistrationLevels = true;
+            const help = document.getElementById("registration-level-help");
+            if (help) help.textContent = "รายการห้องเรียนดึงจากฐานข้อมูลนักเรียนที่ยังใช้งาน เลือก ‘ระบุชั้น/ห้องเรียนเอง’ หากไม่มีห้องที่ต้องการ";
         } else {
-            useFallbackRegistrationLevels(levelSelect);
+            useFallbackRegistrationLevels(levelSelect, "ยังไม่พบห้องเรียนในฐานข้อมูล เลือก ‘ระบุชั้น/ห้องเรียนเอง’ เพื่อกรอกได้");
         }
+        syncQuickRegistrationLevelOptions(levelSelect);
     } catch (e) {
         console.error("Error populating registration levels:", e);
-        useFallbackRegistrationLevels(levelSelect);
+        useFallbackRegistrationLevels(levelSelect, "โหลดรายการห้องเรียนไม่สำเร็จ เลือก ‘ระบุชั้น/ห้องเรียนเอง’ ได้");
+        syncQuickRegistrationLevelOptions(levelSelect);
     }
 }
 
-function useFallbackRegistrationLevels(levelSelect) {
+function useFallbackRegistrationLevels(levelSelect, helpText) {
+    hasPopulatedRegistrationLevels = false;
     levelSelect.innerHTML = `
         <option value="">เลือกระดับชั้น/ห้อง...</option>
-        <optgroup label="มัธยมศึกษาตอนต้น">
-            <option value="ม.1/1">ม.1/1</option><option value="ม.1/2">ม.1/2</option><option value="ม.1/3">ม.1/3</option><option value="ม.1/4">ม.1/4</option>
-            <option value="ม.2/1">ม.2/1</option><option value="ม.2/2">ม.2/2</option><option value="ม.2/3">ม.2/3</option><option value="ม.2/4">ม.2/4</option>
-            <option value="ม.3/1">ม.3/1</option><option value="ม.3/2">ม.3/2</option><option value="ม.3/3">ม.3/3</option><option value="ม.3/4">ม.3/4</option>
-        </optgroup>
-        <optgroup label="มัธยมศึกษาตอนปลาย">
-            <option value="ม.4/1">ม.4/1</option><option value="ม.4/2">ม.4/2</option><option value="ม.4/3">ม.4/3</option><option value="ม.4/4">ม.4/4</option>
-            <option value="ม.5/1">ม.5/1</option><option value="ม.5/2">ม.5/2</option><option value="ม.5/3">ม.5/3</option><option value="ม.5/4">ม.5/4</option>
-            <option value="ม.6/1">ม.6/1</option><option value="ม.6/2">ม.6/2</option><option value="ม.6/3">ม.6/3</option><option value="ม.6/4">ม.6/4</option>
-        </optgroup>
-        <option value="custom" style="color: var(--accent-mint); font-weight: bold;">อื่นๆ (ระบุห้องเรียนเอง)...</option>
+        <option value="custom" style="color: var(--accent-mint); font-weight: bold;">ระบุชั้น/ห้องเรียนเอง...</option>
     `;
+    const help = document.getElementById("registration-level-help");
+    if (help) help.textContent = helpText;
+}
+
+function syncQuickRegistrationLevelOptions(levelSelect) {
+    const quickLevel = document.getElementById("quick-level");
+    if (!quickLevel || !levelSelect) return;
+
+    const previousValue = quickLevel.value;
+    quickLevel.innerHTML = levelSelect.innerHTML;
+    quickLevel.value = [...quickLevel.options].some(option => option.value === previousValue)
+        ? previousValue
+        : "";
 }
 
 // 🛡️ พรีฟิลระดับชั้นในแบบฟอร์มการสมัครเรียน และตรวจสอบว่ามีตัวเลือกนั้นหรือไม่ (ถ้าไม่มีให้สร้างขึ้นมาแบบไดนามิกเพื่อป้องกันข้อมูลผิดพลาด)
