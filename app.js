@@ -3850,7 +3850,7 @@ function renderAdminSettings() {
         document.getElementById("btn-remove-logo").style.display = "inline-flex";
         state.temp_logo_base64 = config.logo_base64;
     } else {
-        previewBox.innerHTML = `<i class="fa-solid fa-graduation-cap" style="color: var(--accent-mint); font-size: 1.5rem;" id="settings-logo-preview-icon"></i>`;
+        previewBox.innerHTML = `<i class="fa-solid fa-graduation-cap" style="color: #334155; font-size: 1.5rem;" id="settings-logo-preview-icon"></i>`;
         document.getElementById("btn-remove-logo").style.display = "none";
         state.temp_logo_base64 = null;
     }
@@ -4043,7 +4043,7 @@ function removeSchoolLogo() {
     
     // รีเซ็ตหน้าตาตัวอย่างในหน้าตั้งค่า
     const previewBox = document.getElementById("settings-logo-preview");
-    previewBox.innerHTML = `<i class="fa-solid fa-graduation-cap" style="color: var(--accent-mint); font-size: 1.5rem;" id="settings-logo-preview-icon"></i>`;
+    previewBox.innerHTML = `<i class="fa-solid fa-graduation-cap" style="color: #334155; font-size: 1.5rem;" id="settings-logo-preview-icon"></i>`;
     
     // ซ่อนปุ่มลบโลโก้ และล้างค่าใน input
     document.getElementById("btn-remove-logo").style.display = "none";

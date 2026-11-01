@@ -7,7 +7,7 @@
     <meta name="description" content="ระบบสมัครเรียนและลงทะเบียนชุมนุมสำหรับนักเรียนระดับมัธยมศึกษาตอนต้นและตอนปลาย รองรับผู้เข้าใช้งานหนาแน่นอย่างรวดเร็วและปลอดภัย พร้อมระบบสำรองสิทธิ์สำหรับนักเรียนใหม่">
     
     <!-- 🎨 CSS Stylesheets & Icons -->
-    <link rel="stylesheet" href="style.css?v=1.2.6">
+    <link rel="stylesheet" href="style.css?v=1.2.7">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
     <!-- 🚀 External Libraries (Supabase and Confetti) via CDN -->
@@ -598,8 +598,8 @@
                             <div class="input-group">
                                 <label>โลโก้และไอคอนโรงเรียน (Favicon & App Icon)</label>
                                 <div style="display: flex; gap: 12px; align-items: center; margin-top: 5px;">
-                                    <div class="logo-preview-box" id="settings-logo-preview" style="width: 50px; height: 50px; border-radius: var(--border-radius-sm); border: 2px dashed var(--accent-mint); display: flex; align-items: center; justify-content: center; overflow: hidden; background: rgba(255,255,255,0.05); flex-shrink: 0;">
-                                        <i class="fa-solid fa-graduation-cap" style="color: var(--accent-mint); font-size: 1.5rem;" id="settings-logo-preview-icon"></i>
+                                    <div class="logo-preview-box" id="settings-logo-preview" style="width: 50px; height: 50px; border-radius: var(--border-radius-sm); display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0;">
+                                        <i class="fa-solid fa-graduation-cap" style="color: #334155; font-size: 1.5rem;" id="settings-logo-preview-icon"></i>
                                     </div>
                                     <div style="flex-grow: 1;">
                                         <input type="file" id="admin-settings-logo-file" accept="image/*" style="display: none;" onchange="handleLogoUpload(event)">
