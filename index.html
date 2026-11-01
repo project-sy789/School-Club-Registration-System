@@ -567,8 +567,9 @@
                             <i class="fa-solid fa-file-import" style="color: var(--accent-mint);"></i>
                             <h4>ลากไฟล์ .csv หรือ .xlsx มาวางที่นี่ หรือคลิกเพื่ออัปโหลด</h4>
                             <p style="color: var(--text-secondary); font-size: 0.85rem;">
-                                โครงสร้างคอลัมน์: <strong>student_id, prefix, first_name, last_name, level, club_name</strong>
+                                โครงสร้างคอลัมน์: <strong>student_id, prefix, first_name, last_name, level, phone, club_name</strong>
                                 <br>(<code>club_name</code> ต้องตรงกับชื่อชุมนุมที่มีอยู่ในระบบ — ตรวจสอบแบบ trim + ไม่สนตัวพิมพ์เล็ก-ใหญ่)
+                                <br><small>นักเรียนที่มีทะเบียนให้ใส่รหัสจริง หากยังไม่มีรหัสให้เว้น <code>student_id</code> และใส่เบอร์โทร 10 หลักใน <code>phone</code> เพื่อให้ค้นใบยืนยันภายหลังได้</small>
                             </p>
                             <input type="file" id="csv-registrations-file-input" accept=".csv, .xlsx, .xls" onchange="handleRegistrationsCSVImport(event)">
                         </div>

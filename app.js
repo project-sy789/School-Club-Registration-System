@@ -3504,7 +3504,7 @@ async function handleStudentCSVImport(event) {
                 const workbook = XLSX.read(data, { type: 'array' });
                 const firstSheet = workbook.SheetNames[0];
                 const worksheet = workbook.Sheets[firstSheet];
-                rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false, defval: "" });
             } else {
                 showToast("ไม่รองรับรูปแบบไฟล์นี้ กรุณาใช้ไฟล์ .csv หรือ .xlsx", "error");
                 return;
@@ -3649,7 +3649,7 @@ async function handleClubsCSVImport(event) {
                 const workbook = XLSX.read(data, { type: 'array' });
                 const firstSheet = workbook.SheetNames[0];
                 const worksheet = workbook.Sheets[firstSheet];
-                rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false, defval: "" });
             } else {
                 showToast("ไม่รองรับรูปแบบไฟล์นี้ กรุณาใช้ไฟล์ .csv หรือ .xlsx", "error");
                 return;
@@ -3740,7 +3740,7 @@ async function handleRegistrationsCSVImport(event) {
                 const workbook = XLSX.read(data, { type: 'array' });
                 const firstSheet = workbook.SheetNames[0];
                 const worksheet = workbook.Sheets[firstSheet];
-                rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false, defval: "" });
             } else {
                 showToast("ไม่รองรับรูปแบบไฟล์นี้ กรุณาใช้ไฟล์ .csv หรือ .xlsx", "error");
                 return;
@@ -3754,6 +3754,7 @@ async function handleRegistrationsCSVImport(event) {
             let firstNameIdx = headers.findIndex(h => h.includes('first_name') || h.includes('ชื่อจริง') || (h.includes('ชื่อ') && !h.includes('ชุมนุม') && !h.includes('นามสกุล')));
             let lastNameIdx = headers.findIndex(h => h.includes('last_name') || h.includes('นามสกุล'));
             let levelIdx = headers.findIndex(h => h.includes('level') || h.includes('ชั้นเรียน') || h.includes('ห้องเรียน') || h.includes('ระดับชั้น'));
+            let phoneIdx = headers.findIndex(h => h.includes('phone') || h.includes('เบอร์โทร') || h.includes('โทรศัพท์'));
             let clubNameIdx = headers.findIndex(h => h.includes('club_name') || h.includes('ชุมนุม'));
 
             // Fallback ตามตำแหน่งคอลัมน์เดิมหากไม่พบ header
@@ -3762,7 +3763,8 @@ async function handleRegistrationsCSVImport(event) {
             if (firstNameIdx === -1) firstNameIdx = 2;
             if (lastNameIdx === -1) lastNameIdx = 3;
             if (levelIdx === -1) levelIdx = 4;
-            if (clubNameIdx === -1) clubNameIdx = 5;
+            if (phoneIdx === -1 && rows[0] && rows[0].length >= 7) phoneIdx = 5;
+            if (clubNameIdx === -1) clubNameIdx = phoneIdx === 5 ? 6 : 5;
 
             const batch = [];
             for (let i = 1; i < rows.length; i++) {
@@ -3774,6 +3776,7 @@ async function handleRegistrationsCSVImport(event) {
                 const first_name = row[firstNameIdx] ? String(row[firstNameIdx]).trim() : '';
                 const last_name = row[lastNameIdx] ? String(row[lastNameIdx]).trim() : '';
                 const level = row[levelIdx] ? String(row[levelIdx]).trim() : '';
+                const phone = phoneIdx >= 0 && row[phoneIdx] ? normalizeBulkImportPhone(row[phoneIdx]) : '';
                 const club_name = row[clubNameIdx] ? String(row[clubNameIdx]).trim() : '';
 
                 // ต้องมีอย่างน้อยชื่อ + นามสกุล + ชุมนุม
@@ -3784,6 +3787,7 @@ async function handleRegistrationsCSVImport(event) {
                         first_name,
                         last_name,
                         level,
+                        phone,
                         club_name
                     });
                 }
@@ -3854,11 +3858,11 @@ function renderBulkRegistrationReport(inserted, skipped, failed) {
         const r = item.row || {};
         const name = `${r.prefix || ""}${r.first_name || ""} ${r.last_name || ""}`.trim() || "(ไม่ระบุชื่อ)";
         return `<tr>
-            <td>${r.student_id || "-"}</td>
-            <td>${name}</td>
-            <td>${r.level || "-"}</td>
-            <td>${r.club_name || "-"}</td>
-            <td style="color: var(--status-warning);">${item.reason || "-"}</td>
+            <td>${escapeHtml(bulkImportDisplayReference(r))}</td>
+            <td>${escapeHtml(name)}</td>
+            <td>${escapeHtml(r.level || "-")}</td>
+            <td>${escapeHtml(r.club_name || "-")}</td>
+            <td style="color: var(--status-warning);">${escapeHtml(item.reason || "-")}</td>
         </tr>`;
     }).join("");
 
@@ -3866,11 +3870,11 @@ function renderBulkRegistrationReport(inserted, skipped, failed) {
         const r = item.row || {};
         const name = `${r.prefix || ""}${r.first_name || ""} ${r.last_name || ""}`.trim() || "(ไม่ระบุชื่อ)";
         return `<tr>
-            <td>${r.student_id || "-"}</td>
-            <td>${name}</td>
-            <td>${r.level || "-"}</td>
-            <td>${r.club_name || "-"}</td>
-            <td style="color: var(--status-danger);">${item.reason || "-"}</td>
+            <td>${escapeHtml(bulkImportDisplayReference(r))}</td>
+            <td>${escapeHtml(name)}</td>
+            <td>${escapeHtml(r.level || "-")}</td>
+            <td>${escapeHtml(r.club_name || "-")}</td>
+            <td style="color: var(--status-danger);">${escapeHtml(item.reason || "-")}</td>
         </tr>`;
     }).join("");
 
@@ -3900,7 +3904,7 @@ function renderBulkRegistrationReport(inserted, skipped, failed) {
                 <table class="data-table">
                     <thead>
                         <tr>
-                            <th>รหัสนักเรียน</th>
+                            <th>รหัสนักเรียน/เบอร์โทร</th>
                             <th>ชื่อ-นามสกุล</th>
                             <th>ระดับชั้น</th>
                             <th>ชุมนุม</th>
@@ -3924,11 +3928,11 @@ function downloadRegistrationsTemplate() {
     }
 
     const data = [
-        ["student_id", "prefix", "first_name", "last_name", "level", "club_name"],
-        ["10001", "นาย", "กิตติพงศ์", "ทองดี", "ม.4/1", "ชุมนุมคอมพิวเตอร์และวิทยาการคำนวณ"],
-        ["10002", "นางสาว", "ณัฏฐณิชา", "จิตอารีย์", "ม.4/1", "ชุมนุมดนตรีสากลและวงสตริง"],
-        ["", "เด็กชาย", "นักเรียนใหม่", "ยังไม่มีรหัส", "ม.1/2", "ชุมนุมศิลปะสร้างสรรค์และการออกแบบ"],
-        ["10015", "เด็กชาย", "พีรพล", "คงกระพัน", "ม.3/1", "ชุมนุมอนุรักษ์ธรรมชาติและสิ่งแวดล้อม"]
+        ["student_id", "prefix", "first_name", "last_name", "level", "phone", "club_name"],
+        ["10001", "นาย", "กิตติพงศ์", "ทองดี", "ม.4/1", "", "ชุมนุมคอมพิวเตอร์และวิทยาการคำนวณ"],
+        ["10002", "นางสาว", "ณัฏฐณิชา", "จิตอารีย์", "ม.4/1", "", "ชุมนุมดนตรีสากลและวงสตริง"],
+        ["", "เด็กชาย", "นักเรียนใหม่", "ยังไม่มีรหัส", "ม.1/2", "0891234567", "ชุมนุมศิลปะสร้างสรรค์และการออกแบบ"],
+        ["10015", "เด็กชาย", "พีรพล", "คงกระพัน", "ม.3/1", "", "ชุมนุมอนุรักษ์ธรรมชาติและสิ่งแวดล้อม"]
     ];
 
     const ws = XLSX.utils.aoa_to_sheet(data);
@@ -3939,6 +3943,7 @@ function downloadRegistrationsTemplate() {
         { wch: 18 }, // first_name
         { wch: 18 }, // last_name
         { wch: 10 }, // level
+        { wch: 14 }, // phone
         { wch: 40 }  // club_name
     ];
 
@@ -4260,7 +4265,7 @@ function registrationReportPeriodLabel(value) {
 async function fetchAllRegistrationRowsForReport(periodValue) {
     let query = supabaseClient.from("registrations").select(`
         id, student_id, prefix, first_name, last_name, level,
-        registration_status, academic_year, semester, created_at, club_id,
+        pending_contact_hint, registration_status, academic_year, semester, created_at, club_id,
         clubs ( name, teacher, location, capacity )
     `).order("created_at", { ascending: true });
     if (periodValue && periodValue !== "all") {
@@ -4381,11 +4386,33 @@ async function loadRegistrationReportPreview() {
     }
 }
 
+function registrationExportIdentity(row) {
+    if (row.registration_status === "pending") {
+        const hint = String(row.pending_contact_hint || "").trim();
+        return hint ? `ข้อมูลอ้างอิงท้าย ${hint}` : "รอจับคู่ข้อมูลนักเรียน";
+    }
+    return row.student_id || "ไม่ระบุรหัสนักเรียน";
+}
+
+function normalizeBulkImportPhone(value) {
+    let digits = String(value ?? "").replace(/\D/g, "");
+    if (/^66\d{9}$/.test(digits)) digits = `0${digits.slice(2)}`;
+    if (/^\d{9}$/.test(digits)) digits = `0${digits}`;
+    return digits;
+}
+
+function bulkImportDisplayReference(row) {
+    const studentId = String(row.student_id || "").trim();
+    if (studentId && !/^0\d{9}$/.test(studentId)) return studentId;
+    const phone = normalizeBulkImportPhone(row.phone || row["เบอร์โทร"] || studentId);
+    return phone.length === 10 ? `เบอร์ลงท้าย ${phone.slice(-4)}` : studentId || "-";
+}
+
 function registrationReportDetailRows(model) {
     return model.rows.map(row => {
         const club = row.clubs || {};
         return [
-            row.academic_year || "-", row.semester || "-", row.student_id || "นักเรียนใหม่",
+            row.academic_year || "-", row.semester || "-", registrationExportIdentity(row),
             `${row.prefix || ""}${row.first_name || ""} ${row.last_name || ""}`.trim(), row.level || "-",
             club.name || "ไม่ระบุชุมนุม", club.teacher || "-", club.location || "-",
             row.registration_status === "verified" ? "ยืนยันแล้ว" : "สำรองสิทธิ์",
@@ -4409,9 +4436,13 @@ async function exportRegistrationReportToExcel() {
         if (!model) return;
         const workbook = XLSX.utils.book_new();
         const summaryData = [["รายงานสรุปการลงทะเบียนชุมนุม"], [model.periodLabel], [model.groupBy === "grade" ? "จัดกลุ่มตามระดับชั้น" : "จัดกลุ่มตามชุมนุม"], [], [model.groupBy === "grade" ? "ระดับชั้น" : "ชุมนุม", "ครูผู้สอน", "สถานที่", "จำนวน/โควตา", "ยืนยันแล้ว", "สำรองสิทธิ์"], ...model.summary.map(item => [item.group, item.teacher, item.location, item.capacity ? `${item.total}/${item.capacity}` : item.total, item.verified, item.pending])];
-        XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(summaryData), "สรุป");
-        const details = [["ปีการศึกษา", "ภาคเรียน", "รหัสนักเรียน", "ชื่อ-นามสกุล", "ระดับชั้น", "ชุมนุม", "ครูผู้สอน", "สถานที่", "สถานะ", "วันเวลาลงทะเบียน"], ...registrationReportDetailRows(model)];
-        XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(details), "รายชื่อ");
+        const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
+        summarySheet["!cols"] = [{ wch: 30 }, { wch: 24 }, { wch: 24 }, { wch: 16 }, { wch: 14 }, { wch: 14 }];
+        XLSX.utils.book_append_sheet(workbook, summarySheet, "สรุป");
+        const details = [["ปีการศึกษา", "ภาคเรียน", "รหัสนักเรียน/ข้อมูลผู้สมัคร", "ชื่อ-นามสกุล", "ระดับชั้น", "ชุมนุม", "ครูผู้สอน", "สถานที่", "สถานะ", "วันเวลาลงทะเบียน"], ...registrationReportDetailRows(model)];
+        const detailSheet = XLSX.utils.aoa_to_sheet(details);
+        detailSheet["!cols"] = [{ wch: 14 }, { wch: 10 }, { wch: 27 }, { wch: 28 }, { wch: 14 }, { wch: 34 }, { wch: 24 }, { wch: 22 }, { wch: 16 }, { wch: 24 }];
+        XLSX.utils.book_append_sheet(workbook, detailSheet, "รายชื่อ");
         const safePeriod = model.periodValue === "all" ? "ทั้งหมด" : model.periodValue.replace("|", "-");
         XLSX.writeFile(workbook, `รายงานลงทะเบียนชุมนุม_${safePeriod}.xlsx`);
         showToast("ส่งออก Excel รายงานสรุปและรายชื่อสำเร็จ", "success");
@@ -4423,7 +4454,40 @@ async function exportRegistrationReportToExcel() {
 function buildRegistrationReportPrintDocument(model) {
     const detailRows = registrationReportDetailRows(model).map(row => `<tr>${row.map(cell => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("");
     const summaryRows = model.summary.map(item => `<tr><td>${escapeHtml(item.group)}</td><td>${escapeHtml(item.teacher)}</td><td>${escapeHtml(item.location)}</td><td>${item.total}${item.capacity ? `/${item.capacity}` : ""}</td><td>${item.verified}</td><td>${item.pending}</td></tr>`).join("");
-    return `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>รายงานลงทะเบียนชุมนุม</title><style>body{font-family:Arial,'Noto Sans Thai',sans-serif;color:#17221c;margin:24px}h1{margin:0 0 6px;color:#047857}h2{margin:22px 0 8px;color:#065f46}p{margin:4px 0;color:#475569}.stats{display:flex;gap:10px;margin:16px 0}.stat{border:1px solid #cbd5e1;border-radius:6px;padding:10px;min-width:130px}.stat strong{display:block;font-size:20px;color:#047857}table{width:100%;border-collapse:collapse;margin-top:8px;font-size:11px}th{background:#d1fae5;color:#064e3b}th,td{border:1px solid #cbd5e1;padding:6px;text-align:left}@media print{button{display:none}.page-break{page-break-before:always}}</style></head><body><h1>รายงานสรุปการลงทะเบียนชุมนุม</h1><p>${escapeHtml(model.periodLabel)} · ${model.groupBy === "grade" ? "แยกตามระดับชั้น" : "แยกตามชุมนุม"}</p><div class="stats"><div class="stat"><strong>${model.total}</strong>ลงทะเบียนทั้งหมด</div><div class="stat"><strong>${model.verified}</strong>ยืนยันแล้ว</div><div class="stat"><strong>${model.pending}</strong>สำรองสิทธิ์</div></div><h2>สรุป</h2><table><thead><tr><th>${model.groupBy === "grade" ? "ระดับชั้น" : "ชุมนุม"}</th><th>ครูผู้สอน</th><th>สถานที่</th><th>จำนวน/โควตา</th><th>ยืนยันแล้ว</th><th>สำรองสิทธิ์</th></tr></thead><tbody>${summaryRows}</tbody></table><h2 class="page-break">รายชื่อผู้ลงทะเบียน</h2><table><thead><tr><th>ปี</th><th>เทอม</th><th>รหัส</th><th>ชื่อ-นามสกุล</th><th>ระดับชั้น</th><th>ชุมนุม</th><th>ครู</th><th>สถานที่</th><th>สถานะ</th><th>วันเวลา</th></tr></thead><tbody>${detailRows}</tbody></table><script>window.onload=()=>{window.print();};<\/script></body></html>`;
+    const groupLabel = model.groupBy === "grade" ? "ระดับชั้น" : "ชุมนุม";
+    return `<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<title>รายงานลงทะเบียนชุมนุม</title>
+<style>
+body{font-family:Arial,'Noto Sans Thai',sans-serif;color:#17221c;margin:24px}
+h1{margin:0 0 6px;color:#047857}h2{margin:22px 0 8px;color:#065f46}
+p{margin:4px 0;color:#475569}.stats{display:flex;gap:10px;margin:16px 0}
+.stat{border:1px solid #cbd5e1;border-radius:6px;padding:10px;min-width:130px}
+.stat strong{display:block;font-size:20px;color:#047857}
+table{width:100%;border-collapse:collapse;margin-top:8px;font-size:11px}
+th{background:#d1fae5;color:#064e3b}th,td{border:1px solid #cbd5e1;padding:6px;text-align:left}
+thead{display:table-header-group}tr{break-inside:avoid;page-break-inside:avoid}
+@page{size:A4 landscape;margin:12mm}
+@media print{button{display:none}.page-break{page-break-before:always}table{font-size:8px}th,td{padding:4px}}
+</style>
+</head>
+<body>
+<h1>รายงานสรุปการลงทะเบียนชุมนุม</h1>
+<p>${escapeHtml(model.periodLabel)} · แยกตาม${groupLabel}</p>
+<div class="stats">
+  <div class="stat"><strong>${model.total}</strong>ลงทะเบียนทั้งหมด</div>
+  <div class="stat"><strong>${model.verified}</strong>ยืนยันแล้ว</div>
+  <div class="stat"><strong>${model.pending}</strong>สำรองสิทธิ์</div>
+</div>
+<h2>สรุป</h2>
+<table><thead><tr><th>${groupLabel}</th><th>ครูผู้สอน</th><th>สถานที่</th><th>จำนวน/โควตา</th><th>ยืนยันแล้ว</th><th>สำรองสิทธิ์</th></tr></thead><tbody>${summaryRows}</tbody></table>
+<h2 class="page-break">รายชื่อผู้ลงทะเบียน</h2>
+<table><thead><tr><th>ปี</th><th>เทอม</th><th>รหัสนักเรียน/ข้อมูลผู้สมัคร</th><th>ชื่อ-นามสกุล</th><th>ระดับชั้น</th><th>ชุมนุม</th><th>ครู</th><th>สถานที่</th><th>สถานะ</th><th>วันเวลา</th></tr></thead><tbody>${detailRows}</tbody></table>
+<script>window.onload=()=>{window.print();};<\/script>
+</body>
+</html>`;
 }
 
 async function exportRegistrationReportToPDF() {
@@ -4456,6 +4520,12 @@ window.exportRegistrationReportToPDF = exportRegistrationReportToPDF;
 // =====================================================================
 // 📊 8. EXPORT CSV FOR THAI EXCEL (UTF-8 WITH BOM)
 // =====================================================================
+function csvCell(value) {
+    let text = String(value ?? "");
+    if (/^[\t\r ]*[=+@-]/.test(text)) text = `'${text}`;
+    return `"${text.replace(/"/g, '""')}"`;
+}
+
 function exportAllRegistrationsToCSV() {
     if (state.registrations.length === 0) {
         showToast("ไม่มีข้อมูลประวัติผู้สมัครที่สามารถส่งออกได้ในขณะนี้", "warning");
@@ -4463,17 +4533,17 @@ function exportAllRegistrationsToCSV() {
     }
 
     // สร้าง Header ภาษาไทย
-    let csvContent = "เลขประจำตัวนักเรียน,คำนำหน้า,ชื่อ,นามสกุล,ระดับชั้น/ห้อง,สถานะสิทธิ์,ชุมนุมที่เลือกเรียน,ครูผู้สอน,สถานที่เรียน,วันเวลาลงทะเบียน\n";
+    let csvContent = "รหัสนักเรียน/ข้อมูลผู้สมัคร,คำนำหน้า,ชื่อ,นามสกุล,ระดับชั้น/ห้อง,สถานะสิทธิ์,ชุมนุมที่เลือกเรียน,ครูผู้สอน,สถานที่เรียน,วันเวลาลงทะเบียน\n";
 
     state.registrations.forEach(r => {
-        const studentId = r.student_id || "นักเรียนใหม่";
+        const studentId = registrationExportIdentity(r);
         const status = r.registration_status === 'verified' ? 'ยืนยันตัวตนสำเร็จ' : 'สำรองสิทธิ์ (Pending)';
         const date = new Date(r.created_at).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" }).replace(",", "");
         const clubName = r.clubs ? r.clubs.name : "ไม่ระบุ";
         const teacherName = r.clubs ? r.clubs.teacher : "ไม่ระบุ";
         const loc = r.clubs ? r.clubs.location : "ไม่ระบุ";
 
-        csvContent += `"${studentId}","${r.prefix || ""}","${r.first_name}","${r.last_name}","${r.level}","${status}","${clubName}","${teacherName}","${loc}","${date}"\n`;
+        csvContent += [studentId, r.prefix, r.first_name, r.last_name, r.level, status, clubName, teacherName, loc, date].map(csvCell).join(",") + "\n";
     });
 
     downloadCSVFile(csvContent, `รายงานการลงทะเบียนชุมนุมทั้งหมด_เทอม${state.settings.school_config.semester}-${state.settings.school_config.academic_year}.csv`);
@@ -4487,14 +4557,14 @@ function exportSingleClubToCSV(clubId, clubName) {
         return;
     }
 
-    let csvContent = "เลขประจำตัวนักเรียน,คำนำหน้า,ชื่อ,นามสกุล,ระดับชั้น/ห้อง,สถานะสิทธิ์,วันเวลาลงทะเบียน\n";
+    let csvContent = "รหัสนักเรียน/ข้อมูลผู้สมัคร,คำนำหน้า,ชื่อ,นามสกุล,ระดับชั้น/ห้อง,สถานะสิทธิ์,วันเวลาลงทะเบียน\n";
 
     clubRegs.forEach(r => {
-        const studentId = r.student_id || "นักเรียนใหม่";
+        const studentId = registrationExportIdentity(r);
         const status = r.registration_status === 'verified' ? 'ยืนยันตัวตนสำเร็จ' : 'สำรองสิทธิ์ (Pending)';
         const date = new Date(r.created_at).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" }).replace(",", "");
 
-        csvContent += `"${studentId}","${r.prefix || ""}","${r.first_name}","${r.last_name}","${r.level}","${status}","${date}"\n`;
+        csvContent += [studentId, r.prefix, r.first_name, r.last_name, r.level, status, date].map(csvCell).join(",") + "\n";
     });
 
     downloadCSVFile(csvContent, `รายชื่อชุมนุม_${clubName}.csv`);
