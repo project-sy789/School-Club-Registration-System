@@ -3616,9 +3616,11 @@ async function handleStudentCSVImport(event) {
             }
 
             // ป้องกัน student_id ซ้ำในไฟล์เดียว (Postgres ON CONFLICT DO UPDATE จะ error 21000 ถ้ามี key ซ้ำในชุดเดียวกัน)
-            // เก็บแถวสุดท้ายของแต่ละรหัสไว้
+            // เก็บแถวสุดท้ายของแต่ละรหัสไว้ และเก็บรายการรหัสซ้ำเพื่อรายงานจำนวนจริงให้ผู้ดูแล
             const dedupedMap = new Map();
+            const duplicateIds = new Set();
             for (const row of batch) {
+                if (dedupedMap.has(row.student_id)) duplicateIds.add(row.student_id);
                 dedupedMap.set(row.student_id, row);
             }
             const dedupedBatch = Array.from(dedupedMap.values());
@@ -3637,7 +3639,7 @@ async function handleStudentCSVImport(event) {
             const duplicateCount = batch.length - dedupedBatch.length;
 
             const toastMsg = duplicateCount > 0
-                ? `กำลังส่งข้อมูลจำนวน ${dedupedBatch.length} คน (ตัดรหัสซ้ำในไฟล์ออก ${duplicateCount} แถว)...`
+                ? `กำลังส่งข้อมูล ${dedupedBatch.length} คน (พบแถวรหัสซ้ำ ${duplicateCount} แถว)...`
                 : `กำลังส่งข้อมูลจำนวน ${dedupedBatch.length} คน เข้าสู่ระบบฐานข้อมูล...`;
             showToast(toastMsg, "info");
 
@@ -3658,7 +3660,16 @@ async function handleStudentCSVImport(event) {
                 }
             }
 
-            showToast(`นำเข้าฐานข้อมูลรายชื่อนักเรียนสำเร็จรวม ${batch.length} รายการ!`, "success");
+            if (duplicateCount > 0) {
+                const duplicateLabel = [...duplicateIds].slice(0, 12).join(", ");
+                const suffix = duplicateIds.size > 12 ? " และรายการอื่น ๆ" : "";
+                showToast(
+                    `นำเข้าสำเร็จ ${dedupedBatch.length} คนจาก ${batch.length} แถว ข้ามรหัสซ้ำ ${duplicateCount} แถว (${duplicateLabel}${suffix})`,
+                    "warning"
+                );
+            } else {
+                showToast(`นำเข้าฐานข้อมูลรายชื่อนักเรียนสำเร็จ ${dedupedBatch.length} คน`, "success");
+            }
             // รายชื่อที่เพิ่งนำเข้าอาจมีห้องใหม่ ต้องสร้างตัวกรองหลังบ้านใหม่ทันที
             hasPopulatedStudentLevels = false;
             await populateStudentLevelDropdown(true);
