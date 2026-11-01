@@ -3059,27 +3059,38 @@ async function getStudentRegistrationMap(termValue = getStudentTermFilterValue()
     return map;
 }
 
-async function populateStudentLevelDropdown() {
+async function populateStudentLevelDropdown(force = false) {
     const filterSelect = document.getElementById("admin-student-level-filter");
-    if (!filterSelect || hasPopulatedStudentLevels) return;
+    if (!filterSelect || (!force && hasPopulatedStudentLevels)) return;
 
     try {
-        const { data, error } = await supabaseClient
-            .from("students")
-            .select("level")
-            .eq("status", "active");
-        
-        if (error) throw error;
-        
-        if (data) {
-            const levels = [...new Set(data.map(item => item.level?.trim()).filter(Boolean))];
+        // Supabase REST จำกัดผลลัพธ์ต่อคำขอ จึงอ่านแบบแบ่งหน้าเพื่อไม่ให้
+        // ห้องที่อยู่หลังรายการแรก (เช่น ห้อง /2 หรือ /3) หายจากตัวกรอง
+        const levels = new Set();
+        const pageSize = 1000;
+        for (let from = 0; ; from += pageSize) {
+            const { data, error } = await supabaseClient
+                .from("students")
+                .select("level")
+                .eq("status", "active")
+                .range(from, from + pageSize - 1);
+            if (error) throw error;
+            (data || []).forEach(item => {
+                const level = String(item.level || "").trim();
+                if (level) levels.add(level);
+            });
+            if (!data || data.length < pageSize) break;
+        }
+
+        if (levels.size > 0) {
+            const levelList = [...levels];
             // จัดเรียงระดับชั้น/ห้อง (เช่น ม.1/1, ม.1/2)
-            levels.sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
+            levelList.sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
             
             const prevVal = filterSelect.value;
             filterSelect.innerHTML = '<option value="" style="background: #0d281a; color: var(--text-primary);">-- เลือกห้องเรียนทั้งหมด --</option>';
             
-            levels.forEach(lvl => {
+            levelList.forEach(lvl => {
                 const option = document.createElement("option");
                 option.value = lvl;
                 option.textContent = lvl;
@@ -3088,7 +3099,10 @@ async function populateStudentLevelDropdown() {
                 filterSelect.appendChild(option);
             });
             
-            filterSelect.value = prevVal;
+            filterSelect.value = levelList.includes(prevVal) ? prevVal : "";
+            hasPopulatedStudentLevels = true;
+        } else {
+            filterSelect.innerHTML = '<option value="" style="background: #0d281a; color: var(--text-primary);">-- เลือกห้องเรียนทั้งหมด --</option>';
             hasPopulatedStudentLevels = true;
         }
     } catch (e) {
@@ -3106,6 +3120,8 @@ function filterAdminStudentsList() {
 async function loadStudentsList() {
     if (!supabaseClient) return;
     const tbody = document.getElementById("admin-students-list-tbody");
+    // อัปเดตตัวเลือกห้องก่อนอ่านค่า filter เพื่อไม่ให้ค่าห้องเก่าค้างหลังนำเข้า/ลบข้อมูล
+    await populateStudentLevelDropdown();
     const searchVal = document.getElementById("admin-student-search-input")?.value.trim() || "";
     const levelVal = (document.getElementById("admin-student-level-filter")?.value || "").trim();
     const regFilter = (document.getElementById("admin-student-reg-filter")?.value || "all").trim();
@@ -3221,8 +3237,6 @@ async function loadStudentsList() {
             tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 1.5rem 0;">${emptyMsg}</td></tr>`;
         }
 
-        // ดึงรายการห้องทั้งหมดมาใส่ใน dropdown
-        await populateStudentLevelDropdown();
     } catch (e) {
         console.error("Error loading students list:", e);
         const resultCount = document.getElementById("admin-student-result-count");
@@ -3487,6 +3501,7 @@ async function deleteStudentRecord(studentId) {
         }
 
         showToast(`ลบนักเรียนรหัส ${studentId} เรียบร้อยแล้ว`, "info");
+        hasPopulatedStudentLevels = false;
         loadStudentsList();
     } catch (e) {
         console.error("Error deleting student:", e);
@@ -3644,8 +3659,11 @@ async function handleStudentCSVImport(event) {
             }
 
             showToast(`นำเข้าฐานข้อมูลรายชื่อนักเรียนสำเร็จรวม ${batch.length} รายการ!`, "success");
-            loadStudentsList();
-            populateRegistrationLevelDropdown(true);
+            // รายชื่อที่เพิ่งนำเข้าอาจมีห้องใหม่ ต้องสร้างตัวกรองหลังบ้านใหม่ทันที
+            hasPopulatedStudentLevels = false;
+            await populateStudentLevelDropdown(true);
+            await loadStudentsList();
+            await populateRegistrationLevelDropdown(true);
         } catch (err) {
             console.error("Error importing bulk data:", err);
             const detail = err?.message || err?.hint || err?.details || '';
