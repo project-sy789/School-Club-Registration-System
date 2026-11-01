@@ -333,7 +333,10 @@ function updateSystemUI() {
     document.getElementById("header-semester-label").innerText = annualScope
         ? `ปีการศึกษา ${term.academic_year}`
         : `ภาคเรียนที่ ${term.semester}/${term.academic_year}`;
-    document.getElementById("banner-school-title").innerText = `ยินดีต้อนรับสู่ระบบลงทะเบียนชุมนุม ${config.school_name || ""}`;
+    const bannerSchoolName = document.getElementById("banner-school-name");
+    if (bannerSchoolName) {
+        bannerSchoolName.textContent = config.school_name || "";
+    }
     document.getElementById("banner-semester-badge").innerText = annualScope
         ? `สมัครครั้งเดียว · ปีการศึกษา ${term.academic_year}`
         : `ภาคเรียนที่ ${term.semester} ปีการศึกษา ${term.academic_year}`;

@@ -375,6 +375,15 @@ nav {
     margin-bottom: 12px;
 }
 
+.banner-welcome-line,
+.banner-school-name {
+    display: block;
+}
+
+.banner-school-name {
+    margin-top: 0.2em;
+}
+
 .hero-content p {
     color: var(--text-secondary);
     font-size: 1.05rem;
