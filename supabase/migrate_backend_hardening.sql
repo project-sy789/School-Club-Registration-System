@@ -1827,9 +1827,9 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'code', 'CONFIRMATION_REQUIRED', 'message', 'คำยืนยันไม่ถูกต้อง');
     END IF;
 
-    SELECT COUNT(*) INTO v_deleted FROM registrations;
-    TRUNCATE TABLE registrations, audit_logs RESTART IDENTITY;
-    UPDATE clubs SET enrolled_count = 0;
+    DELETE FROM registrations WHERE id IS NOT NULL;
+    GET DIAGNOSTICS v_deleted = ROW_COUNT;
+    UPDATE clubs SET enrolled_count = 0 WHERE id IS NOT NULL;
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     INSERT INTO audit_logs (action, details)
     VALUES ('REGISTRATION_DATA_CLEARED', 'ล้างรายการลงทะเบียนสำหรับเริ่มรอบใหม่: ' || v_deleted || ' รายการ');

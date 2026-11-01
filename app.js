@@ -5375,7 +5375,7 @@ async function refreshAfterAdminDataReset() {
 async function clearRegistrationData() {
     if (!supabaseClient || !state.isAdminLoggedIn) return;
     const confirmation = prompt(
-        "การกระทำนี้จะลบรายการลงทะเบียนและ audit log ทั้งหมด แต่เก็บชุมนุม/นักเรียนไว้\n\nพิมพ์ CLEAR REGISTRATIONS เพื่อยืนยัน:",
+        "การกระทำนี้จะลบรายการลงทะเบียนทั้งหมดและรีเซ็ตยอดที่นั่ง โดยเก็บประวัติ audit, ชุมนุม และข้อมูลนักเรียนไว้\n\nพิมพ์ CLEAR REGISTRATIONS เพื่อยืนยัน:",
         ""
     );
     if (confirmation === null) return;
