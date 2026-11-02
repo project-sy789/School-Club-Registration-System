@@ -75,7 +75,7 @@
                         <i class="fa-solid fa-id-card"></i>
                         <span>ระบุตัวตนก่อนเลือกชุมนุม</span>
                     </div>
-                    <label for="student-quick-id" style="font-size:0.8rem; color: var(--text-secondary); margin-bottom: 4px; display:block;">รหัสนักเรียน หรือเลขบัตรประชาชน 13 หลัก</label>
+                    <label for="student-quick-id" style="font-size:0.8rem; color: var(--text-secondary); margin-bottom: 4px; display:block;">กรอกอย่างใดอย่างหนึ่ง: รหัสนักเรียน หรือเลขบัตรประชาชน 13 หลัก</label>
                     <div style="display: flex; gap: 6px;">
                         <input type="text" id="student-quick-id" placeholder="กรอกรหัสนักเรียน หรือเลขบัตร 13 หลัก" inputmode="numeric"
                                onkeyup="handleQuickIdKeyPress(event)"
@@ -84,7 +84,7 @@
                             <i class="fa-solid fa-user-check"></i>
                         </button>
                     </div>
-                    <small style="display:block; margin-top:5px; color:var(--text-secondary);">เลขบัตรใช้ค้นหารหัสนักเรียน ไม่ได้ใช้แทนรหัสนักเรียน</small>
+                    <small style="display:block; margin-top:5px; color:var(--text-secondary);">ถ้าใช้เลขบัตร ระบบจะค้นหารหัสนักเรียนที่ผูกไว้ แล้วใช้รหัสนั้นในการลงทะเบียน</small>
                     <div class="identity-divider"><span>หรือ</span></div>
                     <button onclick="openNewStudentPreRegister()" style="font-size: 0.85rem; padding: 9px 12px; border: 1px dashed var(--accent-mint); color: var(--accent-mint); background: rgba(52,211,153,0.05); width: 100%; display:flex; align-items:center; justify-content: center; gap: 8px; border-radius: 8px; cursor: pointer; transition: all 0.2s; font-weight: 600;" onmouseover="this.style.background='rgba(52,211,153,0.12)'" onmouseout="this.style.background='rgba(52,211,153,0.05)'">
                         <i class="fa-solid fa-user-plus"></i> นักเรียนใหม่ — กรอกประวัติ
@@ -1025,9 +1025,9 @@
                         <!-- ส่วนตรวจสอบสิทธิ์ด้วยเลขประจำตัว -->
                         <div class="id-verification-row">
                         <div class="input-group">
-                    <label for="student-id-input">รหัสนักเรียน หรือเลขบัตรประชาชน 13 หลัก</label>
+                    <label for="student-id-input">กรอกอย่างใดอย่างหนึ่ง: รหัสนักเรียน หรือเลขบัตรประชาชน 13 หลัก</label>
                             <input type="text" id="student-id-input" placeholder="กรอกรหัสนักเรียน หรือเลขบัตร 13 หลัก" autocomplete="off" inputmode="numeric" onkeypress="handleVerifyIdKeyPress(event)">
-                    <small style="display:block; margin-top:5px; color:var(--text-secondary);">เลขบัตรใช้ค้นหารหัสนักเรียน ไม่ได้ใช้แทนรหัสนักเรียน</small>
+                    <small style="display:block; margin-top:5px; color:var(--text-secondary);">ถ้าใช้เลขบัตร ระบบจะค้นหารหัสนักเรียนที่ผูกไว้ แล้วใช้รหัสนั้นในการลงทะเบียน</small>
                         </div>
                         <button class="verify-id-btn" onclick="verifyStudentID()">
                             <i class="fa-solid fa-circle-check"></i> ตรวจสอบ
@@ -1358,6 +1358,6 @@
     <!-- 💻 6. Javascript Logic Engine -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="config.js?v=1.1.2"></script>
-    <script src="app.js?v=1.2.23"></script>
+    <script src="app.js?v=1.2.24"></script>
 </body>
 </html>

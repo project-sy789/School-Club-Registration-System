@@ -726,6 +726,7 @@ async function quickVerifyStudent() {
         showToast("กรุณากรอกรหัสนักเรียนหรือเลขบัตรประชาชนของคุณ", "warning");
         return;
     }
+    const lookupByNationalId = isFullNationalIdInput(idInput);
 
     try {
         const { data, error } = await supabaseClient.rpc("lookup_student_for_registration", {
@@ -753,7 +754,10 @@ async function quickVerifyStudent() {
 
             updateQuickVerifyUI();
 
-            showToast(`ยินดีต้อนรับคุณ ${data.prefix || ""}${data.first_name} ${data.last_name} (${data.level})! ระบบคัดกรองระดับชั้น ${levelPrefix} ให้โดยอัตโนมัติแล้ว`, "success");
+            const lookupMessage = lookupByNationalId
+                ? `พบข้อมูลจากเลขบัตรประชาชน ระบบผูกกับรหัสนักเรียน ${data.student_id} แล้ว`
+                : `ตรวจพบรหัสนักเรียน ${data.student_id}`;
+            showToast(`ยินดีต้อนรับคุณ ${data.prefix || ""}${data.first_name} ${data.last_name} (${data.level})! ${lookupMessage} และคัดกรองระดับชั้น ${levelPrefix} ให้โดยอัตโนมัติแล้ว`, "success");
 
             // รีเรนเดอร์บอร์ดแสดงรายชื่อชุมนุมใหม่
             renderClubsGrid();
@@ -771,6 +775,14 @@ async function quickVerifyStudent() {
         console.error("Error doing quick verify:", e);
         showToast("เกิดข้อผิดพลาดในการเชื่อมต่อเพื่อตรวจสอบรหัสประจำตัว", "error");
     }
+}
+
+// เลขบัตรประชาชนใช้เป็นคีย์ค้นหาเท่านั้น หลังค้นพบแล้วระบบจะใช้รหัสนักเรียน
+// ที่ผูกไว้ในการลงทะเบียนและการอ่านประวัติ ไม่เก็บเลขบัตรไว้ใน browser state
+function isFullNationalIdInput(value) {
+    const text = String(value || "").trim();
+    const digits = text.replace(/\D/g, "");
+    return digits.length === 13 && /^[0-9][0-9 -]*$/.test(text);
 }
 
 function handleQuickIdKeyPress(event) {
@@ -1560,9 +1572,10 @@ async function verifyStudentID() {
     const manualArea = document.getElementById("manual-entry-form");
     
     if (!idInput) {
-        showToast("กรุณากรอกเลขประจำตัวนักเรียน", "warning");
+        showToast("กรุณากรอกรหัสนักเรียนหรือเลขบัตรประชาชน 13 หลัก", "warning");
         return;
     }
+    const lookupByNationalId = isFullNationalIdInput(idInput);
 
     alertBox.style.display = "flex";
     alertBox.className = "verification-alert verified";
@@ -1587,7 +1600,7 @@ async function verifyStudentID() {
                 <i class="fa-solid fa-circle-check"></i> 
                 <div>
                     <strong>ยืนยันตัวตนสำเร็จ:</strong> ${displayName} (${data.level})<br>
-                    <span style="font-size:0.8rem; opacity:0.85;">ระบบใช้รหัสนักเรียนจริงจากฐานข้อมูล คุณลงทะเบียนได้ทันที</span>
+                    <span style="font-size:0.8rem; opacity:0.85;">${lookupByNationalId ? `ค้นพบจากเลขบัตรประชาชน ระบบใช้รหัสนักเรียน ${escapeHtml(data.student_id)} ในการลงทะเบียน` : "ระบบใช้รหัสนักเรียนจริงจากฐานข้อมูล คุณลงทะเบียนได้ทันที"}</span>
                 </div>
             `;
             
