@@ -2189,16 +2189,23 @@ function renderAdminUsers() {
             : user.email_confirmed === false ? "#fcd34d" : "var(--accent-mint)";
         const actionLabel = user.enabled ? "ปิดสิทธิ์" : "เปิดสิทธิ์";
         const actionIcon = user.enabled ? "fa-user-slash" : "fa-user-check";
+        const canManage = !user.is_current_user;
         row.innerHTML = `
             <td><strong>${email}</strong>${user.is_current_user ? ' <span style="font-size:0.75rem; color:var(--accent-mint);">(บัญชีของคุณ)</span>' : ""}</td>
             <td><span style="color:${statusColor}; font-weight:600;">${statusText}</span></td>
             <td style="font-size:0.85rem; color:var(--text-secondary);">${createdAt}</td>
-            <td>
-                <button class="btn-secondary" ${user.is_current_user ? "disabled title=\"บัญชีที่กำลังใช้งานไม่สามารถปิดสิทธิ์ตัวเองได้\"" : ""}
+            <td style="display:flex; gap:6px; flex-wrap:wrap;">
+                <button class="btn-secondary" ${canManage ? "" : "disabled title=\"บัญชีที่กำลังใช้งานไม่สามารถเปลี่ยนหรือลบตัวเองได้\""}
                         onclick="toggleAdminUser('${user.user_id}', ${!user.enabled})"
                         style="padding:7px 12px; font-size:0.8rem;">
                     <i class="fa-solid ${actionIcon}"></i> ${actionLabel}
                 </button>
+                ${canManage ? `<button class="btn-secondary" onclick="resendAdminInvite('${user.user_id}')" style="padding:7px 12px; font-size:0.8rem;" title="สร้างลิงก์ใหม่แทนลิงก์ที่หมดอายุ">
+                    <i class="fa-solid fa-rotate"></i> ลิงก์ใหม่
+                </button>
+                <button class="btn-secondary" onclick="removeAdminUser('${user.user_id}')" style="padding:7px 12px; font-size:0.8rem; color:#fecaca; border-color:rgba(248,113,113,.45);" title="ลบสิทธิ์ออกจากรายการผู้ดูแล">
+                    <i class="fa-solid fa-trash"></i> ลบสิทธิ์
+                </button>` : ""}
             </td>`;
         tbody.appendChild(row);
     });
@@ -2222,7 +2229,8 @@ async function addAdminUser() {
         const { data, error } = await supabaseClient.functions.invoke("admin-invite-user", {
             body: {
                 email,
-                redirectTo: window.location.href.split("#")[0]
+                redirectTo: window.location.href.split("#")[0],
+                resend: false
             }
         });
         if (error) {
@@ -2258,6 +2266,51 @@ async function addAdminUser() {
         showToast(e.message || "เพิ่มผู้ดูแลไม่สำเร็จ", "error");
     } finally {
         button.disabled = false;
+    }
+}
+
+async function resendAdminInvite(userId) {
+    const user = state.adminUsers.find(item => item.user_id === userId);
+    const email = user?.email || "";
+    if (!email) {
+        showToast("ไม่พบอีเมลของผู้ดูแลรายการนี้", "error");
+        return;
+    }
+    if (!confirm(`สร้างลิงก์ผู้ดูแลใหม่สำหรับ ${email} หรือไม่? ลิงก์เดิมจะใช้แทนได้ด้วยลิงก์ใหม่`)) return;
+    try {
+        const { data, error } = await supabaseClient.functions.invoke("admin-invite-user", {
+            body: {
+                email,
+                redirectTo: window.location.href.split("#")[0],
+                resend: true
+            }
+        });
+        if (error) throw error;
+        if (!data?.success || !data.inviteLink) throw new Error(data?.message || "สร้างลิงก์ใหม่ไม่สำเร็จ");
+        showAdminInviteLink(data.inviteLink, data.email, true);
+        showToast("สร้างลิงก์ผู้ดูแลใหม่แล้ว", "success");
+    } catch (e) {
+        console.error("Error resending admin invite:", e);
+        showToast(e.message || "สร้างลิงก์ใหม่ไม่สำเร็จ", "error");
+    }
+}
+
+async function removeAdminUser(userId) {
+    const user = state.adminUsers.find(item => item.user_id === userId);
+    const email = user?.email || "บัญชีนี้";
+    if (!confirm(`ยืนยันลบสิทธิ์ผู้ดูแลของ ${email} หรือไม่?\nบัญชี Auth จะไม่ถูกลบ แต่จะเข้าเมนูผู้ดูแลไม่ได้จนกว่าจะเพิ่มสิทธิ์ใหม่`)) return;
+    try {
+        const { data, error } = await supabaseClient.rpc("admin_remove_user", { p_user_id: userId });
+        if (error) throw error;
+        if (!data?.success) throw new Error(data?.message || "ลบสิทธิ์ผู้ดูแลไม่สำเร็จ");
+        showToast("ลบสิทธิ์ผู้ดูแลออกจากระบบแล้ว", "success");
+        await loadAdminUsers();
+    } catch (e) {
+        console.error("Error removing admin user:", e);
+        const message = e?.code === "42883"
+            ? "ฐานข้อมูลยังไม่มีฟังก์ชันลบสิทธิ์ กรุณารัน supabase/migrate_admin_management.sql ก่อน"
+            : (e.message || "ลบสิทธิ์ผู้ดูแลไม่สำเร็จ");
+        showToast(message, "error");
     }
 }
 
@@ -2355,6 +2408,8 @@ window.completeAdminPasswordSetup = completeAdminPasswordSetup;
 window.copyAdminInviteLink = copyAdminInviteLink;
 window.closeAdminInviteLinkModal = closeAdminInviteLinkModal;
 window.toggleAdminUser = toggleAdminUser;
+window.resendAdminInvite = resendAdminInvite;
+window.removeAdminUser = removeAdminUser;
 
 // โหลดข้อมูลรายงานและตารางสิทธิ์ต่างๆ ทั้งหมดมาเก็บไว้ที่ State
 async function loadAdminDashboardData() {
@@ -3766,26 +3821,95 @@ async function handleClubsCSVImport(event) {
                 return;
             }
 
-            showToast(`กำลังส่งข้อมูลชุมนุมจำนวน ${batch.length} ชุมนุม เข้าสู่ระบบฐานข้อมูล...`, "info");
+            // ชื่อชุมนุมอาจต่างกันแค่ช่องว่าง/ตัวพิมพ์ จึงตรวจซ้ำแบบ normalize
+            // ก่อนเขียนจริง และแยก update ของรายการเดิมออกจาก insert รายการใหม่
+            // เพื่อไม่ให้ upsert สร้างชุมนุมซ้ำโดยเงียบ ๆ
+            const normalizeClubName = value => String(value || "")
+                .normalize("NFC")
+                .replace(/\s+/g, " ")
+                .trim()
+                .toLocaleLowerCase("th-TH");
+            const uniqueBatch = [];
+            const duplicateFileNames = [];
+            const seenFileNames = new Set();
+            for (const club of batch) {
+                const key = normalizeClubName(club.name);
+                if (seenFileNames.has(key)) {
+                    duplicateFileNames.push(club.name);
+                    continue;
+                }
+                seenFileNames.add(key);
+                uniqueBatch.push(club);
+            }
 
-            const { error } = await supabaseClient
+            const { data: existingClubs, error: existingError } = await supabaseClient
                 .from("clubs")
-                .upsert(batch, { onConflict: 'name' });
+                .select("id, name, enrolled_count")
+                .order("name")
+                .limit(10000);
+            if (existingError) throw existingError;
+            const existingByName = new Map();
+            (existingClubs || []).forEach(club => {
+                const key = normalizeClubName(club.name);
+                if (!existingByName.has(key)) existingByName.set(key, club);
+            });
 
-            if (error) throw error;
+            const updates = [];
+            const inserts = [];
+            const capacitySkipped = [];
+            uniqueBatch.forEach(club => {
+                const existing = existingByName.get(normalizeClubName(club.name));
+                if (!existing) {
+                    inserts.push({ ...club, enrolled_count: 0 });
+                    return;
+                }
+                if (Number(club.capacity) < Number(existing.enrolled_count || 0)) {
+                    capacitySkipped.push(`${club.name} (${existing.enrolled_count}/${club.capacity})`);
+                    return;
+                }
+                updates.push({ id: existing.id, club });
+            });
 
-            showToast(`นำเข้าฐานข้อมูลชุมนุมสำเร็จรวม ${batch.length} รายการ!`, "success");
+            if (updates.length || inserts.length) {
+                showToast(`กำลังบันทึก ${updates.length + inserts.length} รายการ (เพิ่มใหม่ ${inserts.length}, อัปเดตเดิม ${updates.length})...`, "info");
+            }
+            for (const { id, club } of updates) {
+                const { error } = await supabaseClient.from("clubs").update(club).eq("id", id);
+                if (error) throw error;
+            }
+            if (inserts.length) {
+                const { error } = await supabaseClient.from("clubs").insert(inserts);
+                if (error) throw error;
+            }
+
+            const warnings = [];
+            if (duplicateFileNames.length) {
+                warnings.push(`ซ้ำในไฟล์ ${duplicateFileNames.length} แถว`);
+            }
+            if (updates.length) {
+                warnings.push(`ชื่อซ้ำกับชุมนุมเดิม ${updates.length} รายการ จึงอัปเดตข้อมูลเดิม`);
+            }
+            if (capacitySkipped.length) {
+                warnings.push(`ข้าม ${capacitySkipped.length} รายการที่โควตาใหม่ต่ำกว่ายอดสมัครแล้ว`);
+            }
+            if (warnings.length) {
+                showToast(`นำเข้าสำเร็จ ${updates.length + inserts.length} รายการ; ${warnings.join("; ")}`, "warning");
+            } else {
+                showToast(`นำเข้าฐานข้อมูลชุมนุมสำเร็จรวม ${inserts.length} รายการ!`, "success");
+            }
             
             // โหลดข้อมูลชุมนุมใหม่
-            loadClubsData();
+            await loadClubsData();
             
             if (state.isAdminLoggedIn) {
                 loadAdminDashboardData();
             }
         } catch (err) {
             console.error("Error importing bulk clubs data:", err);
-            showToast("เกิดข้อผิดพลาดในการ Bulk อัปเดตรายชื่อชุมนุมสู่ Supabase", "error");
+            const detail = err?.message || err?.hint || err?.details || "";
+            showToast(`เกิดข้อผิดพลาดในการ Bulk อัปเดตรายชื่อชุมนุมสู่ Supabase${detail ? `: ${detail}` : ""}`, "error");
         }
+        event.target.value = "";
     };
     
     reader.readAsArrayBuffer(file);

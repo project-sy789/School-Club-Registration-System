@@ -51,7 +51,7 @@ Deno.serve(async (request) => {
     return jsonResponse({ success: false, message: "ไม่มีสิทธิ์เพิ่มผู้ดูแลระบบ" }, 403, origin);
   }
 
-  let body: { email?: unknown; redirectTo?: unknown };
+  let body: { email?: unknown; redirectTo?: unknown; resend?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -59,6 +59,7 @@ Deno.serve(async (request) => {
   }
 
   const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+  const resend = body.resend === true;
   if (!email || email.length > 254 || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     return jsonResponse({ success: false, message: "กรุณากรอกอีเมลให้ถูกต้อง" }, 400, origin);
   }
@@ -79,9 +80,13 @@ Deno.serve(async (request) => {
   try {
     const grantAdmin = async () => caller.rpc("admin_add_user_by_email", { p_email: email });
     const finishExistingAccount = async (grant: Record<string, unknown>) => {
-      if (grant.email_confirmed === false) {
+      // Unconfirmed users need another invite link after an expired token.
+      // Confirmed users only get a recovery link when the admin explicitly
+      // requests a resend, so adding an existing admin remains idempotent.
+      if (grant.email_confirmed === false || resend) {
+        const linkType = grant.email_confirmed === false ? "invite" : "recovery";
         const { data: linkData, error } = await service.auth.admin.generateLink({
-          type: "recovery",
+          type: linkType,
           email,
           options: { redirectTo },
         });
@@ -89,7 +94,7 @@ Deno.serve(async (request) => {
           return {
             success: false,
             email,
-            message: "เพิ่มสิทธิ์แล้ว แต่สร้างลิงก์ตั้งรหัสผ่านไม่สำเร็จ กรุณาลองอีกครั้ง",
+            message: "เพิ่มสิทธิ์แล้ว แต่สร้างลิงก์ใหม่ไม่สำเร็จ กรุณาลองอีกครั้ง",
           };
         }
         const inviteLink = linkData?.properties?.action_link;
@@ -97,7 +102,7 @@ Deno.serve(async (request) => {
           return {
             success: false,
             email,
-            message: "เพิ่มสิทธิ์แล้ว แต่ Supabase ไม่ได้คืนลิงก์ตั้งรหัสผ่าน กรุณาลองอีกครั้ง",
+            message: "เพิ่มสิทธิ์แล้ว แต่ Supabase ไม่ได้คืนลิงก์ใหม่ กรุณาลองอีกครั้ง",
           };
         }
         return {
