@@ -328,6 +328,26 @@ $$;
 REVOKE ALL ON FUNCTION lookup_student_for_registration(TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION lookup_student_for_registration(TEXT) TO anon, authenticated;
 
+-- Public registration forms need the available classroom labels to build their
+-- dropdown. Return only distinct level text through a SECURITY DEFINER RPC;
+-- never grant anon direct access to the students table.
+CREATE OR REPLACE FUNCTION get_registration_levels()
+RETURNS TABLE(level TEXT)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+    SELECT DISTINCT btrim(s.level)::TEXT AS level
+    FROM students AS s
+    WHERE s.status = 'active'
+      AND NULLIF(btrim(s.level), '') IS NOT NULL
+    ORDER BY 1;
+$$;
+
+REVOKE ALL ON FUNCTION get_registration_levels() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION get_registration_levels() TO anon, authenticated;
+
 -- A registration token lets a student see their own result without making the
 -- registrations table public. Store this token in the browser after submit.
 CREATE OR REPLACE FUNCTION get_my_registrations(p_registration_tokens UUID[])

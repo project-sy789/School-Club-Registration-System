@@ -83,6 +83,7 @@ let state = {
     myRegistrationsRequestId: 0,
     studentIdentityLast4: null,
     studentIdentityPromptResolver: null,
+    adminPermissionErrorNotifiedAt: 0,
     clubsLoading: false,
     clubSeatPollingStarted: false,
     clubSeatRefreshTimer: null
@@ -259,6 +260,39 @@ async function syncAdminSession(session) {
         document.getElementById("admin-login-area").style.display = "block";
         document.getElementById("admin-login-fields").style.display = "none";
         document.getElementById("admin-password-setup").style.display = "block";
+    }
+    return true;
+}
+
+// REST จะตอบ 42501 เมื่อ session หมดอายุ/ไม่ใช่ผู้ดูแลแล้วพยายามอ่าน
+// ตารางข้อมูลส่วนบุคคล การแยกกรณีนี้ออกจาก connection error ช่วยหยุดการยิงซ้ำ
+// จากตัวกรองหน้าแอดมิน และไม่ทำให้ผู้ใช้เข้าใจว่าฐานข้อมูลล่ม
+function isAdminPermissionError(error) {
+    const code = String(error?.code || error?.status || "");
+    const message = String(error?.message || "").toLowerCase();
+    return code === "42501"
+        || message.includes("permission denied")
+        || message.includes("row-level security");
+}
+
+function handleAdminPermissionError(error) {
+    if (!isAdminPermissionError(error)) return false;
+
+    state.isAdminLoggedIn = false;
+    state.adminPermissionError = error;
+    const dashboard = document.getElementById("admin-dashboard-area");
+    const loginArea = document.getElementById("admin-login-area");
+    if (dashboard) dashboard.style.display = "none";
+    if (loginArea) loginArea.style.display = "block";
+
+    const now = Date.now();
+    if (!state.adminPermissionErrorNotifiedAt || now - state.adminPermissionErrorNotifiedAt > 4000) {
+        showToast("สิทธิ์ผู้ดูแลหมดอายุหรือไม่ถูกต้อง กรุณาเข้าสู่ระบบผู้ดูแลใหม่", "warning");
+        state.adminPermissionErrorNotifiedAt = now;
+    }
+    // ยกเลิก session ฝั่งเครื่องเพื่อไม่ให้ event จากตัวกรองยิงคำขอเดิมซ้ำ
+    if (supabaseClient?.auth) {
+        supabaseClient.auth.signOut({ scope: "local" }).catch(() => {});
     }
     return true;
 }
@@ -2459,6 +2493,7 @@ async function loadAdminDashboardData() {
         }
     } catch (e) {
         console.error("Error loading admin dashboard data:", e);
+        if (handleAdminPermissionError(e)) return;
         showToast("ไม่สามารถเรียกข้อมูลสิทธิ์การจัดการระบบได้", "error");
     }
 }
@@ -2798,13 +2833,12 @@ let hasPopulatedRegistrationLevels = false;
 
 async function populateRegistrationLevelDropdown(force = false) {
     const levelSelect = document.getElementById("level-input");
-    if (!levelSelect || (!force && hasPopulatedRegistrationLevels)) return;
+    if (!levelSelect || !supabaseClient || (!force && hasPopulatedRegistrationLevels)) return;
 
     try {
-        const { data, error } = await supabaseClient
-            .from("students")
-            .select("level")
-            .eq("status", "active");
+        // นักเรียนทั่วไปห้ามอ่านตาราง students โดยตรง (RLS ป้องกันข้อมูลส่วนบุคคล)
+        // ใช้ RPC ที่คืนเฉพาะรายชื่อห้องเรียนแทน จึงไม่เกิด 42501 เมื่อเปิดหน้าเว็บ
+        const { data, error } = await supabaseClient.rpc("get_registration_levels");
         
         if (error) throw error;
         
@@ -2885,7 +2919,30 @@ async function populateRegistrationLevelDropdown(force = false) {
         syncQuickRegistrationLevelOptions(levelSelect);
     } catch (e) {
         console.error("Error populating registration levels:", e);
-        useFallbackRegistrationLevels(levelSelect, "โหลดรายการห้องเรียนไม่สำเร็จ เลือก ‘ระบุชั้น/ห้องเรียนเอง’ ได้");
+        // รองรับช่วงที่ยังไม่ได้รัน migration ของ RPC: ใช้ระดับที่เปิดในชุมนุม
+        // เป็นตัวเลือกเบื้องต้น และให้กรอกห้องเองได้ โดยไม่ยิงตาราง students ซ้ำ
+        const clubLevels = [...new Set((state.clubs || [])
+            .flatMap(club => getClubGrades(club))
+            .map(level => String(level || "").trim())
+            .filter(Boolean))]
+            .sort((a, b) => a.localeCompare(b, "th", { numeric: true }));
+        if (clubLevels.length > 0) {
+            levelSelect.innerHTML = '<option value="">เลือกระดับชั้น/ห้อง...</option>';
+            clubLevels.forEach(level => {
+                const option = document.createElement("option");
+                option.value = level;
+                option.textContent = level;
+                levelSelect.appendChild(option);
+            });
+            const customOpt = document.createElement("option");
+            customOpt.value = "custom";
+            customOpt.textContent = "อื่นๆ (ระบุห้องเรียนเอง)...";
+            levelSelect.appendChild(customOpt);
+            const help = document.getElementById("registration-level-help");
+            if (help) help.textContent = "เลือกจากระดับที่ชุมนุมเปิดรับ หรือเลือก ‘ระบุชั้น/ห้องเรียนเอง’";
+        } else {
+            useFallbackRegistrationLevels(levelSelect, "เลือก ‘ระบุชั้น/ห้องเรียนเอง’ เพื่อกรอกระดับชั้น/ห้อง");
+        }
         syncQuickRegistrationLevelOptions(levelSelect);
     }
 }
@@ -3129,7 +3186,7 @@ async function getStudentRegistrationMap(termValue = getStudentTermFilterValue()
 
 async function populateStudentLevelDropdown(force = false) {
     const filterSelect = document.getElementById("admin-student-level-filter");
-    if (!filterSelect || (!force && hasPopulatedStudentLevels)) return;
+    if (!filterSelect || !supabaseClient || !state.isAdminLoggedIn || (!force && hasPopulatedStudentLevels)) return;
 
     try {
         // Supabase REST จำกัดผลลัพธ์ต่อคำขอ จึงอ่านแบบแบ่งหน้าเพื่อไม่ให้
@@ -3175,10 +3232,15 @@ async function populateStudentLevelDropdown(force = false) {
         }
     } catch (e) {
         console.error("Error populating student levels:", e);
+        if (handleAdminPermissionError(e)) return;
     }
 }
 
 function filterAdminStudentsList() {
+    if (!state.isAdminLoggedIn) {
+        showToast("เซสชันผู้ดูแลหมดอายุ กรุณาเข้าสู่ระบบใหม่", "warning");
+        return;
+    }
     const resultCount = document.getElementById("admin-student-result-count");
     if (resultCount) resultCount.textContent = "กำลังปรับตัวกรอง...";
     clearTimeout(window.studentDirectoryFilterTimer);
@@ -3186,10 +3248,11 @@ function filterAdminStudentsList() {
 }
 
 async function loadStudentsList() {
-    if (!supabaseClient) return;
+    if (!supabaseClient || !state.isAdminLoggedIn) return;
     const tbody = document.getElementById("admin-students-list-tbody");
     // อัปเดตตัวเลือกห้องก่อนอ่านค่า filter เพื่อไม่ให้ค่าห้องเก่าค้างหลังนำเข้า/ลบข้อมูล
     await populateStudentLevelDropdown();
+    if (!state.isAdminLoggedIn) return;
     const searchVal = document.getElementById("admin-student-search-input")?.value.trim() || "";
     const levelVal = (document.getElementById("admin-student-level-filter")?.value || "").trim();
     const regFilter = (document.getElementById("admin-student-reg-filter")?.value || "all").trim();
@@ -3307,6 +3370,7 @@ async function loadStudentsList() {
 
     } catch (e) {
         console.error("Error loading students list:", e);
+        if (handleAdminPermissionError(e)) return;
         const resultCount = document.getElementById("admin-student-result-count");
         const resultStatus = document.getElementById("admin-student-result-status");
         if (resultCount) resultCount.textContent = "โหลดรายชื่อไม่สำเร็จ";
